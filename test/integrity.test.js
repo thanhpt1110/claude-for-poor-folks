@@ -133,3 +133,29 @@ test('every message the tool prints carries the same prefix', () => {
     }
   }
 });
+
+test('the bundled skill can only be invoked by hand, never by the model', () => {
+  // This is the one part of the package that puts text in front of a model, so
+  // it costs the user tokens. A skill without `disable-model-invocation` can be
+  // pulled in automatically whenever Claude decides it is relevant — which is
+  // exactly the silent, unannounced spending this tool exists to prevent.
+  const skill = fs.readFileSync(path.join(HERE, '..', 'skills', 'review', 'SKILL.md'), 'utf8');
+  const frontmatter = skill.split('---')[1] || '';
+
+  assert.match(frontmatter, /disable-model-invocation:\s*true/,
+    'the skill must be explicit-invocation only');
+  assert.match(frontmatter, /description:/);
+  assert.match(frontmatter, /token/i,
+    'the description must tell the user it costs tokens before they run it');
+});
+
+test('the skill is the only thing in the package that addresses a model', () => {
+  // Everything else stays on the free channel. If a second skill or an always-on
+  // prompt appears, this fails and someone has to justify it.
+  const root = path.join(HERE, '..');
+  const skillsDir = path.join(root, 'skills');
+  const skills = fs.existsSync(skillsDir) ? fs.readdirSync(skillsDir).sort() : [];
+  assert.deepEqual(skills, ['review'], `unexpected skills: ${skills.join(', ')}`);
+  assert.ok(!fs.existsSync(path.join(root, 'agents')), 'no bundled agents');
+  assert.ok(!fs.existsSync(path.join(root, 'commands')), 'no bundled commands');
+});

@@ -18,6 +18,23 @@ Initial public release.
   would rather the model classify — it understands every language and costs about 60
   tokens per session.
 
+### Added
+
+- `/poor-folks:review` — a skill bundled with the plugin. It runs `report --json` and has the
+  model turn the figures into a short, ranked list of habits worth changing. Numbers are the
+  tool's job; interpretation is the model's.
+  - It is **explicit-invocation only** (`disable-model-invocation: true`), so it can never be
+    pulled into a session automatically. It is the one part of this package that puts text in
+    front of a model, at roughly 500–900 tokens, and its description says so before you run it.
+    A test fails if that guard is ever removed.
+
+### Fixed
+
+- `report --json` embedded ANSI colour codes inside JSON strings. Findings are now structured
+  (`{ code, severity, message, data }`) and carry no colour; the text renderer adds it.
+- Per-model cost showed `$0.00` when no prices were configured, next to a session total of
+  several dollars — "not known" rendered as "nothing". It now reports `null` and shows tokens.
+
 ### Notes on Claude Code's undocumented behaviour
 
 Measured while building the meter, and recorded because anyone writing a similar tool

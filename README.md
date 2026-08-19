@@ -88,6 +88,11 @@ claude-for-poor-folks install    # wires the status line + hooks
 
 A plugin manifest can declare hooks but **not** a status line. You get the gate, the warnings
 and the report; for the always-on traffic light, run `install` as above.
+
+The plugin also carries one skill, `/poor-folks:review`. It reads the report and tells you
+which habits are costing money. It runs **only when you type it** — never on its own — and
+it is the only part of this package that puts anything in front of a model, at roughly
+500–900 tokens. Everything else stays on the channel the model cannot read.
 </details>
 
 ---
@@ -102,6 +107,7 @@ and the report; for the always-on traffic light, run `install` as above.
 | 👀 | `status` | current config + live sessions |
 | 🩺 | `doctor` | check the wiring |
 | 🧹 | `uninstall` | undo `install` |
+| 🔍 | `/poor-folks:review` | *(plugin only)* have Claude read the report and name the habits to change — costs ~500–900 tokens, runs only when you type it |
 
 ```
 $ claude-for-poor-folks report

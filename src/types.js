@@ -176,6 +176,15 @@
  */
 
 /**
+ * A retrospective finding from `report`. No colour: the text renderer adds it.
+ * @typedef {object} Leak
+ * @property {string} code                       stable identifier, e.g. "cache"
+ * @property {'notice'|'warn'} severity
+ * @property {string} message                    one sentence, already readable
+ * @property {Record<string, any>} [data]        the numbers behind the sentence
+ */
+
+/**
  * @typedef {object} Detection
  * @property {string} profileId
  * @property {'certain'|'high'|'low'} confidence

@@ -79,3 +79,32 @@ test('status runs with no sessions at all', () => {
   assert.match(out, /none in the last 6 hours/);
   assert.ok(quiet(() => true));
 });
+
+test('a cost that is not known is reported as unknown, never as zero', () => {
+  // With no prices configured, every model used to show $0.00 next to a session
+  // total of several dollars. Turning "not known" into "nothing" is the one
+  // direction this tool must never fail in.
+  seed();
+  const out = capture(() => runReport(['--json']));
+  const byModel = JSON.parse(out).byModel;
+  assert.ok(byModel.length > 0);
+  for (const m of byModel) {
+    assert.equal(m.costUsd, null, 'unknown cost must be null, not 0');
+    assert.ok(m.tokens > 0, 'and the tokens must still be reported');
+  }
+});
+
+test('report --json contains no terminal colour codes', () => {
+  // JSON is what a script or a model consumes; ANSI escapes inside it are noise
+  // at best and a parse hazard at worst.
+  seed();
+  const out = capture(() => runReport(['--json']));
+  const ansi = /\u001b/;
+  assert.ok(!ansi.test(out), 'found an ANSI escape in JSON output');
+  const parsed = JSON.parse(out);
+  for (const leak of parsed.leaks) {
+    assert.ok(!ansi.test(leak.message));
+    assert.equal(typeof leak.code, 'string');
+    assert.equal(typeof leak.severity, 'string');
+  }
+});

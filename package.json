@@ -37,6 +37,7 @@
   },
   "files": [
     "src",
+    "skills",
     ".claude-plugin",
     "docs/demo.svg",
     "README.md",

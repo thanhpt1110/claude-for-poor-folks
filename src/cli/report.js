@@ -97,10 +97,10 @@ function group(rows, keyFn) {
 /**
  * @param {import('../types.js').LedgerRow[]} sessions
  * @param {Record<string, import('../types.js').PriceEntry>} prices
- * @returns {Array<{key: string, costUsd: number, tokens: number, sessions: number}>}
+ * @returns {Array<{key: string, costUsd: number|null, tokens: number, sessions: number}>}
  */
 function groupByModel(sessions, prices) {
-  /** @type {Map<string, {key: string, costUsd: number, tokens: number, sessions: number}>} */
+  /** @type {Map<string, {key: string, costUsd: number|null, tokens: number, sessions: number}>} */
   const out = new Map();
   for (const s of sessions) {
     /** @type {import('../types.js').ByModel} */
@@ -108,16 +108,20 @@ function groupByModel(sessions, prices) {
       ? s.byModel
       : (s.model && s.tokens ? { [s.model]: s.tokens } : {});
     for (const [model, t] of Object.entries(models)) {
-      const g = out.get(model) ?? { key: model, costUsd: 0, tokens: 0, sessions: 0 };
+      const g = out.get(model) ?? { key: model, costUsd: /** @type {number|null} */ (null), tokens: 0, sessions: 0 };
       g.tokens += num(t.input) + num(t.output) + num(t.cacheRead) + num(t.cacheCreate);
-      g.costUsd += estimateCost(/** @type {import('../types.js').ByModel} */ ({ [model]: t }), prices) ?? 0;
+      // `?? 0` here used to turn "no prices configured" into "$0.00", so every
+      // model showed nothing next to a session total of several dollars.
+      // Unknown is reported as unknown.
+      const priced = estimateCost(/** @type {import('../types.js').ByModel} */ ({ [model]: t }), prices);
+      if (priced != null) g.costUsd = (g.costUsd ?? 0) + priced;
       g.sessions += 1;
       out.set(model, g);
     }
   }
   const rows = [...out.values()];
-  const anyCost = rows.some(r => r.costUsd > 0);
-  return rows.sort((a, b) => (anyCost ? b.costUsd - a.costUsd : b.tokens - a.tokens));
+  const anyCost = rows.some(r => (r.costUsd ?? 0) > 0);
+  return rows.sort((a, b) => (anyCost ? (b.costUsd ?? 0) - (a.costUsd ?? 0) : b.tokens - a.tokens));
 }
 
 /** @param {number} frac @param {number} [width] */
@@ -128,7 +132,7 @@ function bar(frac, width = 18) {
 
 /**
  * @param {string} title
- * @param {Array<{key: string, costUsd: number, tokens: number, sessions: number}>} groups
+ * @param {Array<{key: string, costUsd: number|null, tokens: number, sessions: number}>} groups
  * @param {number} total
  * @param {{ showTokens?: boolean }} [opts]
  */
@@ -137,8 +141,10 @@ function table(title, groups, total, { showTokens = false } = {}) {
   /** @type {string[]} */
   const lines = [bold(title)];
   for (const g of groups.slice(0, 10)) {
-    const frac = total > 0 ? g.costUsd / total : 0;
-    const amount = (total > 0 || !showTokens) ? money(g.costUsd) : `${humanTokens(g.tokens)} tok`;
+    const frac = total > 0 && g.costUsd != null ? g.costUsd / total : 0;
+    const amount = g.costUsd == null
+      ? `${humanTokens(g.tokens)} tok`
+      : (total > 0 || !showTokens) ? money(g.costUsd) : `${humanTokens(g.tokens)} tok`;
     lines.push(`  ${g.key.slice(0, 26).padEnd(26)} ${amount.padStart(9)}  ${bar(frac)} ${dim(`${g.sessions} session${g.sessions === 1 ? '' : 's'}`)}`);
   }
   return lines.join('\n');
@@ -147,22 +153,36 @@ function table(title, groups, total, { showTokens = false } = {}) {
 /**
  * The part people act on. Thresholds come from config, so the retrospective view
  * and the live warnings can never drift apart.
- */
-/**
+ *
+ * Findings are structured and carry no colour. `report --json` used to put ANSI
+ * escapes inside JSON strings, which is meaningless to whatever asked for JSON —
+ * and JSON is exactly what a script or a model consumes. Colour is applied by
+ * the text renderer, at the edge.
+ *
  * @param {import('../types.js').LedgerRow[]} sessions
  * @param {import('../types.js').Limits} limits
- * @returns {string[]}
+ * @returns {import('../types.js').Leak[]}
  */
 function leaks(sessions, limits) {
-  /** @type {string[]} */
+  /** @type {import('../types.js').Leak[]} */
   const out = [];
   const compacted = sessions.filter(s => num(s.compactCount) >= 1);
   if (compacted.length) {
-    out.push(`${compacted.length} session(s) hit compaction, ${money(compacted.reduce((a, s) => a + costOf(s), 0))} total. Compaction re-reads everything; splitting the work into fresh sessions is usually cheaper and sharper.`);
+    const cost = compacted.reduce((a, s) => a + costOf(s), 0);
+    out.push({
+      code: 'compaction', severity: 'warn',
+      message: `${compacted.length} session(s) hit compaction, ${money(cost)} total. Compaction re-reads everything; splitting the work into fresh sessions is usually cheaper and sharper.`,
+      data: { sessions: compacted.length, costUsd: Number(cost.toFixed(6)) }
+    });
   }
   const fanout = sessions.filter(s => num(s.subagentCount) >= limits.warnSubagents);
   if (fanout.length) {
-    out.push(`${fanout.length} session(s) spawned ${limits.warnSubagents}+ subagents, ${money(fanout.reduce((a, s) => a + costOf(s), 0))} total. Fan-out multiplies spend faster than anything else.`);
+    const cost = fanout.reduce((a, s) => a + costOf(s), 0);
+    out.push({
+      code: 'fanout', severity: 'notice',
+      message: `${fanout.length} session(s) spawned ${limits.warnSubagents}+ subagents, ${money(cost)} total. Fan-out multiplies spend faster than anything else.`,
+      data: { sessions: fanout.length, costUsd: Number(cost.toFixed(6)), threshold: limits.warnSubagents }
+    });
   }
   const minInput = Number(limits.cacheMinInputTokens ?? 50_000);
   const cacheRows = sessions.filter(s => s.tokens && tokensOf(s) > minInput);
@@ -170,14 +190,26 @@ function leaks(sessions, limits) {
     const ratios = cacheRows.map(s => cacheReadRatio(s.tokens)).filter(r => r != null);
     if (ratios.length) {
       const avg = ratios.reduce((a, b) => a + b, 0) / ratios.length;
-      const label = avg >= 0.7 ? green('healthy') : avg >= limits.minCacheReadRatio ? yellow('mediocre') : red('poor');
-      out.push(`Average prompt-cache read ratio: ${(avg * 100).toFixed(0)}% (${label}). Cache reads cost ~1/10 of fresh input, so this ratio is the single biggest lever on the bill.`);
+      const label = avg >= 0.7 ? 'healthy' : avg >= limits.minCacheReadRatio ? 'mediocre' : 'poor';
+      out.push({
+        code: 'cache', severity: label === 'healthy' ? 'notice' : 'warn',
+        message: `Average prompt-cache read ratio: ${(avg * 100).toFixed(0)}% (${label}). Cache reads cost ~1/10 of fresh input, so this ratio is the single biggest lever on the bill.`,
+        data: { ratio: Number(avg.toFixed(4)), label, sessions: cacheRows.length }
+      });
     }
   }
   const over = sessions.filter(s => num(s.budgetUsd) > 0 && costOf(s) > num(s.budgetUsd));
-  if (over.length) out.push(`${over.length} session(s) finished over their cap.`);
+  if (over.length) out.push({
+    code: 'over-budget', severity: 'warn',
+    message: `${over.length} session(s) finished over their cap.`,
+    data: { sessions: over.length }
+  });
   const blind = sessions.filter(s => s.recognized === false);
-  if (blind.length) out.push(`${blind.length} session(s) produced a status-line payload this version did not understand — their dollar figures are not trustworthy. Update the tool.`);
+  if (blind.length) out.push({
+    code: 'blind-meter', severity: 'warn',
+    message: `${blind.length} session(s) produced a status-line payload this version did not understand — their dollar figures are not trustworthy. Update the tool.`,
+    data: { sessions: blind.length }
+  });
   return out;
 }
 
@@ -246,7 +278,7 @@ export function runReport(argv = []) {
   const l = leaks(sessions, limits);
   if (l.length) {
     out.push('\n' + bold('where it leaks'));
-    for (const x of l) out.push(`  ${yellow('•')} ${x}`);
+    for (const x of l) out.push(`  ${x.severity === 'warn' ? yellow('•') : dim('•')} ${x.message}`);
   }
   out.push('');
   process.stdout.write(out.join('\n') + '\n');
