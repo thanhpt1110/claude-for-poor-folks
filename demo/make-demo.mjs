@@ -40,7 +40,7 @@ const frames = [
     [],
     [{ t: '> fix the crash in auth.ts when the token expires', fill: C.text }],
     [],
-    [{ t: '  [claude-for-poor-folks] task looks like "Small bug fix" (fix, crash)', fill: C.dim }],
+    [{ t: '  [poor-folks] task looks like "Small bug fix" (fix, crash)', fill: C.dim }],
     [{ t: '               — cap $0.50. No question asked.', fill: C.dim }],
     [],
     [{ dot: C.green }, { t: '  $0.02/$0.50 ', fill: C.green }, { t: 'bugfix · ctx 8% · 5h 21%', fill: C.dim }]
@@ -62,7 +62,7 @@ const frames = [
     [{ t: '  ● Edit auth.ts · Bash(npm test) — 3 failing', fill: C.dim }],
     [{ t: '  ● Edit auth.ts · Bash(npm test) — 3 failing', fill: C.dim }],
     [],
-    [{ t: '  [claude-for-poor-folks]', fill: C.yellow }],
+    [{ t: '  [poor-folks]', fill: C.yellow }],
     [{ t: '  ! 80% of budget used — $0.41 of $0.50', fill: C.yellow }],
     [],
     [{ dot: C.yellow }, { t: '  $0.41/$0.50 ', fill: C.yellow }, { t: 'bugfix · ctx 62% · 5h 24% · $0.34/m', fill: C.dim }]
@@ -73,7 +73,7 @@ const frames = [
     [{ t: '  ● Edit auth.ts · Bash(npm test) — 3 failing', fill: C.dim }],
     [{ t: '  ● Edit auth.ts · Bash(npm test) — 3 failing', fill: C.dim }],
     [],
-    [{ t: '  [claude-for-poor-folks]', fill: C.red, bold: true }],
+    [{ t: '  [poor-folks]', fill: C.red, bold: true }],
     [{ t: '  !! Burning $0.91/min (limit $0.30/min)', fill: C.red, bold: true }],
     [{ t: '     At this rate the budget is gone in ~0.1 min.', fill: C.text }],
     [{ t: '     -> Usually a retry loop. Check the last minute.', fill: C.text }],
