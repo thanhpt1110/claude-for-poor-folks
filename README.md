@@ -91,7 +91,7 @@ Both routes end up with the same features, by different paths:
 | | via npm | via plugin |
 |---|---|---|
 | hooks, gate, warnings, `report` | ✅ | ✅ |
-| the CLI on your PATH | npm installs it | the plugin ships `bin/`, so it is there too |
+| the CLI on your PATH | npm installs it | the plugin ships `bin/`, so it is there too *(a `sh` shim — verified on Linux and macOS; on Windows, install via npm)* |
 | the review skill | `install` copies it in, as `/poor-folks-review` | comes with the plugin, as `/poor-folks:review` |
 | **status line** | `install` wires it | `install --status-line-only`, once |
 

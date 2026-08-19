@@ -166,9 +166,12 @@ test('uninstall takes back the skill it installed', () => {
   } finally { process.chdir(cwd); }
 });
 
-test('the plugin ships an executable that works without npm', () => {
+test('the plugin ships an executable that works without npm',
+  { skip: process.platform === 'win32' && 'POSIX shim; Windows parity is not claimed' }, () => {
   // `bin/` lands on the Bash tool's PATH while a plugin is enabled, so someone
-  // who never ran npm can still use the CLI.
+  // who never ran npm can still use the CLI. Verified on Linux and macOS; the
+  // wrapper is `#!/bin/sh`, and no Windows machine was available to test it, so
+  // the README does not claim it works there.
   const bin = path.join(HERE_INSTALL, '..', 'bin', 'claude-for-poor-folks');
   assert.ok(fs.existsSync(bin), 'bin/claude-for-poor-folks must exist');
   assert.ok((fs.statSync(bin).mode & 0o111) !== 0, 'and it must be executable');
@@ -223,7 +226,8 @@ test('uninstall removes only the file it wrote, not the directory around it', ()
   } finally { process.chdir(cwd); }
 });
 
-test('both shipped executables work directly and through a symlink', () => {
+test('both shipped executables work directly and through a symlink',
+  { skip: process.platform === 'win32' && 'POSIX exec bits and symlinks' }, () => {
   // `npm pack` drops symlinks and a Windows checkout cannot make them, so both
   // are real files; and an alias placed elsewhere on PATH must still resolve
   // back to the package rather than look beside itself.
