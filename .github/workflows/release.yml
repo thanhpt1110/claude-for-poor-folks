@@ -1,0 +1,74 @@
+# Publishes to npm with NO stored token.
+#
+# GitHub mints a short-lived OIDC token, npm verifies it came from THIS workflow
+# in THIS repository, and publishes. There is no secret to leak, rotate, or paste
+# into a chat window. Provenance (SLSA build level 3) is attached automatically.
+#
+# One-time setup, on npmjs.com (a token cannot do this — the API returns
+# Unauthorized, it must be done in the browser):
+#   package -> Settings -> Trusted Publisher -> GitHub Actions
+#     organization or user: thanhpt1110
+#     repository:           claude-for-poor-folks
+#     workflow filename:    release.yml
+#
+# Then every release is:  npm version patch && git push --follow-tags
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # to create the GitHub Release for the tag
+  id-token: write        # the whole point: lets GitHub mint the OIDC token
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22          # trusted publishing needs >= 22.14
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm install -g npm@latest   # trusted publishing needs npm >= 11.5.1
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # npm versions are immutable, so re-running a tag must be a no-op rather
+      # than a red build.
+      - id: check
+        name: Is this version already on the registry?
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "claude-for-poor-folks@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$VERSION is already published — nothing to do."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.check.outputs.published == 'false'
+        run: npm publish --access public
+
+      # The npm page and the GitHub Releases page should tell the same story.
+      # GitHub Packages is a different registry (npm.pkg.github.com) and does not
+      # mirror npmjs.com, so the link between the two is this release plus the
+      # provenance attestation that trusted publishing attaches to the tarball.
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NOTES=$(awk "/^## \\[$VERSION\\]/{f=1;next} /^## \\[/{f=0} f" CHANGELOG.md)
+          [ -n "$NOTES" ] || NOTES="See CHANGELOG.md"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" --notes "$NOTES"
+          else
+            gh release create "v$VERSION" --title "v$VERSION" --notes "$NOTES" \
+              --verify-tag
+          fi
+          echo "https://www.npmjs.com/package/claude-for-poor-folks/v/$VERSION"
+

@@ -1,0 +1,98 @@
+{
+  "PostToolUse": {
+    "cwd": "/FIXTURE/repo",
+    "duration_ms": 1495,
+    "effort": {
+      "level": "xhigh"
+    },
+    "hook_event_name": "PostToolUse",
+    "permission_mode": "bypassPermissions",
+    "prompt_id": "fixture-prompt_id",
+    "session_id": "fixture-session_id",
+    "tool_input": "<redacted for the fixture>",
+    "tool_name": "Agent",
+    "tool_response": "<redacted for the fixture>",
+    "tool_use_id": "fixture-tool_use_id",
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "PreToolUse": {
+    "cwd": "/FIXTURE/repo",
+    "effort": {
+      "level": "xhigh"
+    },
+    "hook_event_name": "PreToolUse",
+    "permission_mode": "bypassPermissions",
+    "prompt_id": "fixture-prompt_id",
+    "session_id": "fixture-session_id",
+    "tool_input": "<redacted for the fixture>",
+    "tool_name": "Agent",
+    "tool_use_id": "fixture-tool_use_id",
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "SessionEnd": {
+    "cwd": "/FIXTURE/repo",
+    "hook_event_name": "SessionEnd",
+    "prompt_id": "fixture-prompt_id",
+    "reason": "other",
+    "session_id": "fixture-session_id",
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "SessionStart": {
+    "cwd": "/FIXTURE/repo",
+    "hook_event_name": "SessionStart",
+    "session_id": "fixture-session_id",
+    "source": "startup",
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "Stop": {
+    "background_tasks": [],
+    "cwd": "/FIXTURE/repo",
+    "effort": {
+      "level": "xhigh"
+    },
+    "hook_event_name": "Stop",
+    "last_assistant_message": "<redacted for the fixture>",
+    "permission_mode": "bypassPermissions",
+    "prompt_id": "fixture-prompt_id",
+    "session_crons": [],
+    "session_id": "fixture-session_id",
+    "stop_hook_active": false,
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "SubagentStart": {
+    "agent_id": "fixture-agent_id",
+    "agent_type": "general-purpose",
+    "cwd": "/FIXTURE/repo",
+    "hook_event_name": "SubagentStart",
+    "prompt_id": "fixture-prompt_id",
+    "session_id": "fixture-session_id",
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "SubagentStop": {
+    "agent_id": "fixture-agent_id",
+    "agent_transcript_path": "/FIXTURE/transcript.jsonl",
+    "agent_type": "general-purpose",
+    "background_tasks": [],
+    "cwd": "/FIXTURE/repo",
+    "effort": {
+      "level": "xhigh"
+    },
+    "hook_event_name": "SubagentStop",
+    "last_assistant_message": "<redacted for the fixture>",
+    "permission_mode": "bypassPermissions",
+    "prompt_id": "fixture-prompt_id",
+    "session_crons": [],
+    "session_id": "fixture-session_id",
+    "stop_hook_active": false,
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  },
+  "UserPromptSubmit": {
+    "cwd": "/FIXTURE/repo",
+    "hook_event_name": "UserPromptSubmit",
+    "permission_mode": "bypassPermissions",
+    "prompt": "<redacted for the fixture>",
+    "prompt_id": "fixture-prompt_id",
+    "session_id": "fixture-session_id",
+    "transcript_path": "/FIXTURE/transcript.jsonl"
+  }
+}

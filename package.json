@@ -1,0 +1,64 @@
+{
+  "name": "claude-for-poor-folks",
+  "version": "0.1.1",
+  "description": "Live cost, token and quota meter for Claude Code - budget gate, runaway-loop burn-rate alarm, and prompt-cache leak detector. Zero dependencies, fully local, never blocks a tool call.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "ai-agent",
+    "llm",
+    "llm-cost",
+    "cost",
+    "budget",
+    "token-usage",
+    "tokens",
+    "quota",
+    "rate-limit",
+    "prompt-caching",
+    "statusline",
+    "hooks",
+    "cli",
+    "finops",
+    "observability"
+  ],
+  "license": "MIT",
+  "author": "thanhpt1110",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "claude-for-poor-folks": "./src/cli/index.js",
+    "pclaude": "./src/cli/index.js"
+  },
+  "exports": {
+    ".": "./src/core/index.js"
+  },
+  "files": [
+    "src",
+    ".claude-plugin",
+    "docs/demo.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node scripts/run-tests.js",
+    "typecheck": "tsc",
+    "bench": "node test/bench.js",
+    "check": "npm run typecheck && npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thanhpt1110/claude-for-poor-folks.git"
+  },
+  "homepage": "https://github.com/thanhpt1110/claude-for-poor-folks#readme",
+  "bugs": {
+    "url": "https://github.com/thanhpt1110/claude-for-poor-folks/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "// why": "Types without a build step. tsc only checks; nothing is emitted, so what ships is exactly what was written — which matters for a tool people are invited to read before trusting it with their settings.json.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.js", "test/**/*.js", "scripts/**/*.js"]
+}

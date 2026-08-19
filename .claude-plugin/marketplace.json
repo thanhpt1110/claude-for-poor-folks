@@ -1,0 +1,29 @@
+{
+  "name": "poor-folks",
+  "owner": {
+    "name": "thanhpt1110"
+  },
+  "metadata": {
+    "description": "Cost and budget tooling for people running Claude Code on their own money."
+  },
+  "plugins": [
+    {
+      "name": "poor-folks",
+      "source": "./",
+      "version": "0.1.1",
+      "description": "Live cost, token and quota meter: budget gate, burn-rate alarm for runaway loops, prompt-cache leak detector. Zero dependencies, fully local, adds no text to your conversation.",
+      "author": {
+        "name": "thanhpt1110"
+      },
+      "homepage": "https://github.com/thanhpt1110/claude-for-poor-folks",
+      "license": "MIT",
+      "keywords": [
+        "cost",
+        "budget",
+        "tokens",
+        "quota",
+        "observability"
+      ]
+    }
+  ]
+}

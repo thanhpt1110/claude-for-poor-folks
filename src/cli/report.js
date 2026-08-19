@@ -1,0 +1,279 @@
+/**
+ * `report` answers the only question that changes behaviour: where did the
+ * money go, and which habit caused it?
+ *
+ * Sources, in order of trust:
+ *   1. the session transcript, re-read in full (the Stop hook can race the
+ *      transcript writer, so live numbers can be a turn short)
+ *   2. the `kind:'session'` ledger row written at SessionEnd
+ *   3. the last `kind:'turn'` row, for sessions that are still open or crashed
+ *
+ * No price table is maintained here either: dollars come from Claude Code, or
+ * from prices the user supplied. Everything tolerates a corrupt ledger line,
+ * because a report that crashes on one bad row is a report nobody trusts.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { readLedger, ledgerFile, listRecentSessions, effectiveCost } from '../io/state.js';
+import { loadConfig, effectiveLimits, homeDir } from '../io/config.js';
+import { readSessionTotals, cacheReadRatio, estimateCost } from '../io/transcript.js';
+import { money, humanTokens, bold, dim, green, yellow, red } from '../core/format.js';
+import { decide } from '../core/policy.js';
+
+/** @param {unknown} x */
+const num = x => (Number.isFinite(Number(x)) ? Number(x) : 0);
+/** A ledger row is only as trustworthy as the disk it came from. */
+/** @param {unknown} cwd */
+const repoName = cwd => (typeof cwd === 'string' && cwd ? path.basename(cwd) : 'unknown');
+
+/**
+ * @param {import('../types.js').LedgerRow[]} rows
+ * @returns {import('../types.js').LedgerRow[]}
+ */
+function bySession(rows) {
+  /** @type {Map<string, import('../types.js').LedgerRow>} */
+  const map = new Map();
+  for (const r of rows) {
+    if (r.kind === 'session') { map.set(r.sessionId, { ...r }); continue; }
+    if (!map.has(r.sessionId)) map.set(r.sessionId, { ...r, partial: true });
+    else {
+      const prev = map.get(r.sessionId);
+      if (prev?.partial) map.set(r.sessionId, { ...prev, ...r, partial: true });
+    }
+  }
+  return [...map.values()];
+}
+
+/** Re-read transcripts so the report is right even when the live meter was not. */
+/**
+ * @param {import('../types.js').LedgerRow[]} sessions
+ * @param {Record<string, import('../types.js').PriceEntry>} prices
+ * @returns {import('../types.js').LedgerRow[]}
+ */
+function reconcile(sessions, prices) {
+  for (const s of sessions) {
+    if (!s.transcriptPath) continue;
+    let fresh;
+    try { fresh = readSessionTotals(s.transcriptPath); } catch { continue; }
+    if (!fresh.tokens.messages) continue;
+    s.tokens = fresh.tokens;
+    s.byModel = fresh.byModel;
+    s.reconciled = true;
+    const est = estimateCost(fresh.byModel, prices);
+    if (est != null) s.estCostUsd = est;
+  }
+  return sessions;
+}
+
+/** @param {import('../types.js').LedgerRow} s */
+const costOf = s => effectiveCost({ costUsd: num(s.costUsd), estCostUsd: s.estCostUsd });
+/** @param {import('../types.js').LedgerRow} s */
+const tokensOf = s => (s.tokens ? num(s.tokens.input) + num(s.tokens.output) + num(s.tokens.cacheRead) + num(s.tokens.cacheCreate) : 0);
+
+/**
+ * @param {import('../types.js').LedgerRow[]} rows
+ * @param {(r: import('../types.js').LedgerRow) => string|string[]|null|undefined} keyFn
+ * @returns {Array<{key: string, costUsd: number, tokens: number, sessions: number}>}
+ */
+function group(rows, keyFn) {
+  /** @type {Map<string, {key: string, costUsd: number, tokens: number, sessions: number}>} */
+  const out = new Map();
+  for (const r of rows) {
+    const raw = keyFn(r) ?? 'unknown';
+    for (const key of Array.isArray(raw) ? raw : [raw]) {
+      const k = String(key ?? 'unknown');
+      const g = out.get(k) ?? { key: k, costUsd: 0, tokens: 0, sessions: 0 };
+      g.costUsd += costOf(r);
+      g.tokens += tokensOf(r);
+      g.sessions += 1;
+      out.set(k, g);
+    }
+  }
+  return [...out.values()].sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens);
+}
+
+/** Per-model, using the real breakdown rather than one representative model. */
+/**
+ * @param {import('../types.js').LedgerRow[]} sessions
+ * @param {Record<string, import('../types.js').PriceEntry>} prices
+ * @returns {Array<{key: string, costUsd: number, tokens: number, sessions: number}>}
+ */
+function groupByModel(sessions, prices) {
+  /** @type {Map<string, {key: string, costUsd: number, tokens: number, sessions: number}>} */
+  const out = new Map();
+  for (const s of sessions) {
+    /** @type {import('../types.js').ByModel} */
+    const models = s.byModel && Object.keys(s.byModel).length
+      ? s.byModel
+      : (s.model && s.tokens ? { [s.model]: s.tokens } : {});
+    for (const [model, t] of Object.entries(models)) {
+      const g = out.get(model) ?? { key: model, costUsd: 0, tokens: 0, sessions: 0 };
+      g.tokens += num(t.input) + num(t.output) + num(t.cacheRead) + num(t.cacheCreate);
+      g.costUsd += estimateCost(/** @type {import('../types.js').ByModel} */ ({ [model]: t }), prices) ?? 0;
+      g.sessions += 1;
+      out.set(model, g);
+    }
+  }
+  const rows = [...out.values()];
+  const anyCost = rows.some(r => r.costUsd > 0);
+  return rows.sort((a, b) => (anyCost ? b.costUsd - a.costUsd : b.tokens - a.tokens));
+}
+
+/** @param {number} frac @param {number} [width] */
+function bar(frac, width = 18) {
+  const n = Math.max(0, Math.min(width, Math.round((Number.isFinite(frac) ? frac : 0) * width)));
+  return '█'.repeat(n) + dim('░'.repeat(width - n));
+}
+
+/**
+ * @param {string} title
+ * @param {Array<{key: string, costUsd: number, tokens: number, sessions: number}>} groups
+ * @param {number} total
+ * @param {{ showTokens?: boolean }} [opts]
+ */
+function table(title, groups, total, { showTokens = false } = {}) {
+  if (!groups.length) return '';
+  /** @type {string[]} */
+  const lines = [bold(title)];
+  for (const g of groups.slice(0, 10)) {
+    const frac = total > 0 ? g.costUsd / total : 0;
+    const amount = (total > 0 || !showTokens) ? money(g.costUsd) : `${humanTokens(g.tokens)} tok`;
+    lines.push(`  ${g.key.slice(0, 26).padEnd(26)} ${amount.padStart(9)}  ${bar(frac)} ${dim(`${g.sessions} session${g.sessions === 1 ? '' : 's'}`)}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The part people act on. Thresholds come from config, so the retrospective view
+ * and the live warnings can never drift apart.
+ */
+/**
+ * @param {import('../types.js').LedgerRow[]} sessions
+ * @param {import('../types.js').Limits} limits
+ * @returns {string[]}
+ */
+function leaks(sessions, limits) {
+  /** @type {string[]} */
+  const out = [];
+  const compacted = sessions.filter(s => num(s.compactCount) >= 1);
+  if (compacted.length) {
+    out.push(`${compacted.length} session(s) hit compaction, ${money(compacted.reduce((a, s) => a + costOf(s), 0))} total. Compaction re-reads everything; splitting the work into fresh sessions is usually cheaper and sharper.`);
+  }
+  const fanout = sessions.filter(s => num(s.subagentCount) >= limits.warnSubagents);
+  if (fanout.length) {
+    out.push(`${fanout.length} session(s) spawned ${limits.warnSubagents}+ subagents, ${money(fanout.reduce((a, s) => a + costOf(s), 0))} total. Fan-out multiplies spend faster than anything else.`);
+  }
+  const minInput = Number(limits.cacheMinInputTokens ?? 50_000);
+  const cacheRows = sessions.filter(s => s.tokens && tokensOf(s) > minInput);
+  if (cacheRows.length) {
+    const ratios = cacheRows.map(s => cacheReadRatio(s.tokens)).filter(r => r != null);
+    if (ratios.length) {
+      const avg = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+      const label = avg >= 0.7 ? green('healthy') : avg >= limits.minCacheReadRatio ? yellow('mediocre') : red('poor');
+      out.push(`Average prompt-cache read ratio: ${(avg * 100).toFixed(0)}% (${label}). Cache reads cost ~1/10 of fresh input, so this ratio is the single biggest lever on the bill.`);
+    }
+  }
+  const over = sessions.filter(s => num(s.budgetUsd) > 0 && costOf(s) > num(s.budgetUsd));
+  if (over.length) out.push(`${over.length} session(s) finished over their cap.`);
+  const blind = sessions.filter(s => s.recognized === false);
+  if (blind.length) out.push(`${blind.length} session(s) produced a status-line payload this version did not understand — their dollar figures are not trustworthy. Update the tool.`);
+  return out;
+}
+
+/** @param {string[]} [argv] */
+export function runReport(argv = []) {
+  const i = argv.indexOf('--days');
+  const parsed = i >= 0 ? Number(argv[i + 1]) : 30;
+  const days = Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+  const asJson = argv.includes('--json');
+
+  const config = loadConfig(process.cwd());
+  const limits = effectiveLimits(config, config.profile);
+  const since = Date.now() - days * 86_400_000;
+  const sessions = argv.includes('--no-reconcile')
+    ? bySession(readLedger(since))
+    : reconcile(bySession(readLedger(since)), config.prices);
+
+  const total = sessions.reduce((a, s) => a + costOf(s), 0);
+  const tokenTotal = sessions.reduce((a, s) => a + tokensOf(s), 0);
+
+  if (asJson) {
+    process.stdout.write(JSON.stringify({
+      days,
+      totalUsd: Number(total.toFixed(6)),
+      totalTokens: tokenTotal,
+      sessions: sessions.length,
+      byProfile: group(sessions, r => r.profileLabel || r.profile),
+      byRepo: group(sessions, r => repoName(r.cwd)),
+      byModel: groupByModel(sessions, config.prices),
+      leaks: leaks(sessions, limits)
+    }, null, 2) + '\n');
+    return;
+  }
+
+  if (!sessions.length) {
+    process.stdout.write(
+      `no data yet (${ledgerFile()})\n` +
+      dim('The ledger fills up as sessions end. Check the wiring with: claude-for-poor-folks doctor\n')
+    );
+    return;
+  }
+
+  /** @type {string[]} */
+  const out = [`\n${bold(`claude-for-poor-folks · last ${days} days`)}`];
+  const head = total > 0 ? bold(money(total)) : bold(`${humanTokens(tokenTotal)} tokens`);
+  out.push(`  ${head} across ${sessions.length} session(s)` +
+    (total > 0 ? dim(` · ${humanTokens(tokenTotal)} tokens · avg ${money(total / sessions.length)}/session`) : ''));
+  if (total === 0 && tokenTotal > 0) {
+    out.push(dim('  (no cost data — add "prices" to your config to see dollars for headless sessions)'));
+  }
+  out.push('');
+  out.push(table('by task profile', group(sessions, r => r.profileLabel || r.profile), total, { showTokens: true }));
+  out.push('');
+  out.push(table('by repo', group(sessions, r => repoName(r.cwd)), total, { showTokens: true }));
+  out.push('');
+  out.push(table('by model', groupByModel(sessions, config.prices), total, { showTokens: true }));
+
+  const top = [...sessions].sort((a, b) => costOf(b) - costOf(a)).slice(0, 5);
+  out.push('\n' + bold('most expensive sessions'));
+  for (const s of top) {
+    const amount = total > 0 ? money(costOf(s)) : `${humanTokens(tokensOf(s))} tok`;
+    out.push(`  ${amount.padStart(9)}  ${dim(String(s.ts || '').slice(0, 16))}  ${String(s.profile || '?').padEnd(9)} ` +
+      dim(`${num(s.promptCount)} prompts · ${num(s.toolCount)} tools · ${num(s.subagentCount)} subagents${s.partial ? ' · still open' : ''}`));
+  }
+
+  const l = leaks(sessions, limits);
+  if (l.length) {
+    out.push('\n' + bold('where it leaks'));
+    for (const x of l) out.push(`  ${yellow('•')} ${x}`);
+  }
+  out.push('');
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+/** @param {string[]} [_argv] */
+export function runStatus(_argv = []) {
+  const config = loadConfig(process.cwd());
+  const limits = effectiveLimits(config, config.profile);
+  /** @type {string[]} */
+  const out = [`\n${bold('config')}`];
+  const sources = config._sources ?? { global: '', repo: null };
+  out.push(`  repo   ${sources.repo || dim('(none — using defaults)')}`);
+  out.push(`  global ${sources.global && fs.existsSync(sources.global) ? sources.global : dim('(none)')}`);
+  out.push(`  profile ${config.profile || 'auto'} · cap ${money(limits.sessionUsd)} · burn ${money(limits.burnUsdPerMin)}/min · on-limit ${config.onLimit}` +
+    `${config.unattended ? ' · unattended' : ''}${config.askProfile ? ' · may ask (costs ~60 tokens/session)' : ' · never adds tokens'}`);
+  for (const w of config._warnings || []) out.push(`  ${yellow('config')} ${w}`);
+
+  out.push(`\n${bold('live sessions')}`);
+  const live = listRecentSessions();
+  if (!live.length) out.push(dim('  none in the last 6 hours'));
+  for (const s of live) {
+    const lim = effectiveLimits(config, s.profile);
+    const d = decide(s, { ...lim, sessionUsd: s.budgetUsd ?? lim.sessionUsd });
+    out.push(`  ${money(effectiveCost(s)).padStart(8)}/${money(s.budgetUsd ?? lim.sessionUsd)} ${String(s.profile || '?').padEnd(9)} ` +
+      dim(`${s.promptCount}p ${s.toolCount}t · ctx ${Number(s.ctxPct || 0).toFixed(0)}% · ${d.levelName} `) + dim(s.cwd || ''));
+  }
+  out.push(dim(`\nstate: ${homeDir()}\n`));
+  process.stdout.write(out.join('\n'));
+}
