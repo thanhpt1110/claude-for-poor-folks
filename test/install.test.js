@@ -3,7 +3,21 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runInstall, runUninstall } from '../src/cli/install.js';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { runInstall, runUninstall, runDoctor } from '../src/cli/install.js';
+
+const HERE_INSTALL = path.dirname(fileURLToPath(import.meta.url));
+
+/** @param {() => any} fn @returns {Promise<string>} */
+const capture = async fn => {
+  /** @type {string[]} */
+  const chunks = [];
+  const w = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (/** @type {any} */ s) => { chunks.push(String(s)); return true; };
+  try { await fn(); } finally { process.stdout.write = w; }
+  return chunks.join('');
+};
 
 function sandbox() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorclaude-install-'));
@@ -107,4 +121,200 @@ test('init with piped stdin writes a config instead of silently doing nothing', 
   } finally {
     process.chdir(cwd);
   }
+});
+
+
+test('installing from npm also brings the skill the plugin channel ships', () => {
+  // Neither channel is complete alone: a plugin manifest cannot declare a status
+  // line, and an npm install carries no skill. This closes the npm half.
+  const cwd = process.cwd();
+  try {
+    const { dir } = sandbox();
+    quiet(() => runInstall([]));
+    const skill = path.join(dir, '.claude', 'skills', 'poor-folks-review', 'SKILL.md');
+    assert.ok(fs.existsSync(skill), 'the skill must be installed alongside the hooks');
+    const body = fs.readFileSync(skill, 'utf8');
+    assert.match(body, /disable-model-invocation:\s*true/, 'and it must stay explicit-invocation only');
+  } finally { process.chdir(cwd); }
+});
+
+test('a skill already sitting at that path is never overwritten or deleted', () => {
+  // The path belongs to the user, not to this tool.
+  const cwd = process.cwd();
+  try {
+    const { dir } = sandbox();
+    const target = path.join(dir, '.claude', 'skills', 'poor-folks-review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'someone else wrote this');
+
+    quiet(() => runInstall([]));
+    assert.equal(fs.readFileSync(target, 'utf8'), 'someone else wrote this', 'install must not overwrite it');
+
+    quiet(() => runUninstall([]));
+    assert.ok(fs.existsSync(target), 'uninstall must not delete it either');
+  } finally { process.chdir(cwd); }
+});
+
+test('uninstall takes back the skill it installed', () => {
+  const cwd = process.cwd();
+  try {
+    const { dir } = sandbox();
+    quiet(() => runInstall([]));
+    quiet(() => runUninstall([]));
+    assert.ok(!fs.existsSync(path.join(dir, '.claude', 'skills', 'poor-folks-review')),
+      'our own skill should be gone');
+  } finally { process.chdir(cwd); }
+});
+
+test('the plugin ships an executable that works without npm', () => {
+  // `bin/` lands on the Bash tool's PATH while a plugin is enabled, so someone
+  // who never ran npm can still use the CLI.
+  const bin = path.join(HERE_INSTALL, '..', 'bin', 'claude-for-poor-folks');
+  assert.ok(fs.existsSync(bin), 'bin/claude-for-poor-folks must exist');
+  assert.ok((fs.statSync(bin).mode & 0o111) !== 0, 'and it must be executable');
+  const out = execFileSync(bin, ['--version']).toString().trim();
+  assert.match(out, /^\d+\.\d+\.\d+$/, `expected a version, got ${out}`);
+});
+
+
+test('--status-line-only adds the one thing a plugin cannot, and nothing else', () => {
+  // A plugin already supplies the eight hooks, and its copies are not in
+  // settings.json, so a full install cannot see them to dedupe and would wire
+  // every hook a second time: doubled banners, doubled latency, and a daily
+  // total inflated by two Stop hooks appending the same delta.
+  const cwd = process.cwd();
+  try {
+    const { dir, settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    quiet(() => runInstall(['--status-line-only']));
+
+    const after = JSON.parse(fs.readFileSync(settings, 'utf8'));
+    assert.ok(after.statusLine, 'the status line is the point');
+    assert.equal(Object.keys(after.hooks || {}).length, 0, 'no hooks may be added');
+    assert.ok(!fs.existsSync(path.join(dir, '.claude', 'skills', 'poor-folks-review')),
+      'and no skill either — the plugin already has one');
+  } finally { process.chdir(cwd); }
+});
+
+test('a full install still wires everything', () => {
+  const cwd = process.cwd();
+  try {
+    const { dir, settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    quiet(() => runInstall([]));
+    const after = JSON.parse(fs.readFileSync(settings, 'utf8'));
+    assert.equal(Object.keys(after.hooks).length, 8);
+    assert.ok(after.statusLine);
+    assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'poor-folks-review', 'SKILL.md')));
+  } finally { process.chdir(cwd); }
+});
+
+test('uninstall removes only the file it wrote, not the directory around it', () => {
+  const cwd = process.cwd();
+  try {
+    const { dir } = sandbox();
+    quiet(() => runInstall([]));
+    const skillDir = path.join(dir, '.claude', 'skills', 'poor-folks-review');
+    fs.writeFileSync(path.join(skillDir, 'notes-of-my-own.md'), 'mine');
+
+    quiet(() => runUninstall([]));
+    assert.ok(!fs.existsSync(path.join(skillDir, 'SKILL.md')), 'ours goes');
+    assert.ok(fs.existsSync(path.join(skillDir, 'notes-of-my-own.md')), 'theirs stays');
+  } finally { process.chdir(cwd); }
+});
+
+test('both shipped executables work directly and through a symlink', () => {
+  // `npm pack` drops symlinks and a Windows checkout cannot make them, so both
+  // are real files; and an alias placed elsewhere on PATH must still resolve
+  // back to the package rather than look beside itself.
+  const binDir = path.join(HERE_INSTALL, '..', 'bin');
+  const link = fs.mkdtempSync(path.join(os.tmpdir(), 'poorfolks-bin-'));
+  for (const name of ['claude-for-poor-folks', 'pclaude']) {
+    const real = path.join(binDir, name);
+    assert.ok(fs.existsSync(real) && !fs.lstatSync(real).isSymbolicLink(), `${name} must be a real file`);
+    assert.ok((fs.statSync(real).mode & 0o111) !== 0, `${name} must be executable`);
+    assert.match(execFileSync(real, ['--version']).toString().trim(), /^\d+\.\d+\.\d+$/);
+
+    const alias = path.join(link, `alias-${name}`);
+    fs.symlinkSync(real, alias);
+    assert.match(execFileSync(alias, ['--version']).toString().trim(), /^\d+\.\d+\.\d+$/,
+      `${name} must survive being reached through a symlink`);
+  }
+});
+
+
+test('doctor never sends a plugin user into a second set of hooks', async () => {
+  // The notice fires once per project and names doctor as the lasting fallback,
+  // so doctor had to stop saying "run install" — a plugin's hooks come from its
+  // manifest, are invisible here, and a full install would wire all eight again.
+  const cwd = process.cwd();
+  try {
+    const { settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    const out = await capture(() => runDoctor([]));
+    assert.match(out, /--status-line-only/, 'the plugin case must be offered');
+    assert.match(out, /Otherwise you need everything/, 'and the fresh-machine case too');
+    assert.ok(!/^\s*note\s+nothing is wired yet — run: claude-for-poor-folks install$/m.test(out),
+      'it must not give the bare full-install instruction');
+  } finally { process.chdir(cwd); }
+});
+
+test('doctor calls an empty status-line slot empty, not somebody else\'s', async () => {
+  const cwd = process.cwd();
+  try {
+    const { settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    const out = await capture(() => runDoctor([]));
+    assert.match(out, /statusLine: empty/);
+    assert.ok(!/someone else's/.test(out), 'nobody else is there');
+  } finally { process.chdir(cwd); }
+});
+
+test('doctor tells someone with hooks but no status line exactly which flag to use', async () => {
+  const cwd = process.cwd();
+  try {
+    const { settings } = sandbox();
+    fs.writeFileSync(settings, JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'x #poor-folks' }] }] }
+    }));
+    const out = await capture(() => runDoctor([]));
+    assert.match(out, /hooks are wired but the status line is not/);
+    assert.match(out, /--status-line-only/);
+  } finally { process.chdir(cwd); }
+});
+
+test('doctor says --force when the slot is taken by someone else', async () => {
+  const cwd = process.cwd();
+  try {
+    const { settings } = sandbox();
+    fs.writeFileSync(settings, JSON.stringify({
+      statusLine: { type: 'command', command: 'their-own.sh' },
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'x #poor-folks' }] }] }
+    }));
+    const out = await capture(() => runDoctor([]));
+    assert.match(out, /--force/, 'because install refuses to replace it otherwise');
+  } finally { process.chdir(cwd); }
+});
+
+test('a fully wired install gives doctor nothing to complain about', async () => {
+  const cwd = process.cwd();
+  try {
+    sandbox();
+    quiet(() => runInstall([]));
+    const out = await capture(() => runDoctor([]));
+    assert.ok(!/note /.test(out), `doctor should be quiet, got: ${out}`);
+  } finally { process.chdir(cwd); }
+});
+
+test('--status-line-only warns when nothing supplies the hooks', async () => {
+  // Without hooks from somewhere the meter renders defaults forever.
+  const cwd = process.cwd();
+  try {
+    const { settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    const out = await capture(() => runInstall(['--status-line-only']));
+    assert.match(out, /no hooks found in settings.json/);
+    assert.ok(!('hooks' in JSON.parse(fs.readFileSync(settings, 'utf8'))),
+      'and it must not leave an empty hooks key behind');
+  } finally { process.chdir(cwd); }
 });

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Put the CLI on the Bash tool's PATH while the plugin is enabled, so someone who
+# installed through the plugin marketplace can run `claude-for-poor-folks ...`
+# without npm and without knowing where the plugin was cached.
+#
+# Verified: with a plugin loaded, `command -v claude-for-poor-folks` resolves here.
+#
+# Follows symlinks, so an alias placed elsewhere on PATH still finds the package.
+target=$0
+while [ -L "$target" ]; do
+  link=$(readlink "$target") || break
+  case $link in
+    /*) target=$link ;;
+    *)  target=$(dirname -- "$target")/$link ;;
+  esac
+done
+here=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd)
+exec node "$here/../src/cli/index.js" "$@"

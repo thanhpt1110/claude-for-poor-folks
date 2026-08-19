@@ -1,0 +1,17 @@
+#!/bin/sh
+# A real file rather than a symlink: `npm pack` drops symlinks, and a Windows git
+# checkout without symlink support materialises one as a text file that will not
+# execute.
+#
+# Resolves symlinks for the same reason the main wrapper does: an alias placed
+# elsewhere on PATH must still find the package, not look beside the alias.
+target=$0
+while [ -L "$target" ]; do
+  link=$(readlink "$target") || break
+  case $link in
+    /*) target=$link ;;
+    *)  target=$(dirname -- "$target")/$link ;;
+  esac
+done
+here=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd)
+exec "$here/claude-for-poor-folks" "$@"

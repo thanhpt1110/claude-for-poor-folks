@@ -15,10 +15,15 @@ never sent anywhere.
 
 ## What it writes
 
-- `~/.poor-folks/` — session counters, a ledger of costs, and your global config.
+- `~/.poor-folks/` — session counters, a ledger of costs, your global config, and one small
+  flag per project under `notices/` recording that a one-time message has already been shown,
+  so it is not repeated. Flags age out on the same schedule as session state.
 - `.poor-folks.json` in the repo you ran `init` in.
 - `.claude/settings.json` — only the status line and hook entries it added, each marked so
   `uninstall` removes exactly those and nothing else. A timestamped backup is written first.
+- `.claude/skills/poor-folks-review/SKILL.md` — the review skill, copied there by `install` so
+  that an npm install has the same features as the plugin. `uninstall` removes it again, and
+  neither command touches a file at that path that it did not write.
 
 ## What it never does
 

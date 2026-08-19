@@ -14,11 +14,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { bold, dim, green, yellow, red } from '../core/format.js';
 import { homeDir } from '../io/config.js';
+import { skillPath, SKILL_DIR_NAME, MARKER, settingsPath, readSettings, isOurs, statusLineState } from '../io/wiring.js';
 
-// Appended to every command we write, as a shell comment. The command itself is
-// an absolute path that differs between a global npm install and a git checkout,
-// so the path cannot be the marker; this can be found and removed exactly.
-const MARKER = '#poor-folks';
 
 /** Trailing shell comment: harmless if run through a shell, ignored as argv if not. */
 /** @param {string} command */
@@ -47,17 +44,7 @@ function cliInvocation() {
   return { cmd: `node ${JSON.stringify(entry)}`, warn: null };
 }
 
-/** @param {boolean} isGlobal */
-function settingsPath(isGlobal) {
-  return isGlobal
-    ? path.join(os.homedir(), '.claude', 'settings.json')
-    : path.join(process.cwd(), '.claude', 'settings.json');
-}
 
-/** @param {string} file @returns {any} */
-function readSettings(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
-}
 
 /** @param {string} file @returns {string|null} */
 function backup(file) {
@@ -70,10 +57,6 @@ function backup(file) {
   return bak;
 }
 
-/** @param {unknown} entry */
-function isOurs(entry) {
-  try { return JSON.stringify(entry ?? null).includes(MARKER); } catch { return false; }
-}
 
 /** settings.json is hand-edited, so any shape can turn up. Never assume. */
 /** @param {unknown} value @returns {any[]} */
@@ -86,10 +69,45 @@ function writeSettings(file, settings) {
   fs.renameSync(tmp, file);          // atomic: Claude Code may be reading this
 }
 
+/**
+ * Copy the review skill next to the settings we just wired.
+ *
+ * An npm install has no plugin manifest, so it would otherwise miss the one
+ * skill the plugin channel ships. This closes that half of the gap. An existing
+ * file that is not ours is left alone.
+ * @param {boolean} isGlobal
+ * @returns {'installed'|'present'|'foreign'|'missing-source'|'failed'|'skipped'}
+ */
+function installSkill(isGlobal) {
+  const target = skillPath(isGlobal);
+  const source = path.resolve(fileURLToPath(import.meta.url), '..', '..', '..', 'skills', 'review', 'SKILL.md');
+  if (!fs.existsSync(source)) return 'missing-source';
+  try {
+    if (fs.existsSync(target)) {
+      return fs.readFileSync(target, 'utf8').includes('poor-folks') ? 'present' : 'foreign';
+    }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+    return 'installed';
+  } catch {
+    // Reported, never thrown: the hooks and status line are already written and
+    // announced by this point, so an unwritable skills directory must not turn a
+    // successful install into a stack trace.
+    return 'failed';
+  }
+}
+
 /** @param {string[]} [argv] */
 export function runInstall(argv = []) {
   const isGlobal = argv.includes('--global');
   const force = argv.includes('--force');
+  // A plugin already supplies the eight hooks, and its copies live in the plugin
+  // manifest rather than settings.json, so nothing here can see them to dedupe.
+  // Telling a plugin user to run a full `install` therefore wires every hook a
+  // second time: doubled banners, doubled latency, and a daily-spend figure
+  // inflated by two Stop hooks appending the same delta. This flag exists so the
+  // one thing a plugin cannot do — the status line — can be added on its own.
+  const statusLineOnly = argv.includes('--status-line-only');
   const file = settingsPath(isGlobal);
   const { cmd, warn } = cliInvocation();
 
@@ -114,7 +132,7 @@ export function runInstall(argv = []) {
   /** @type {string[]} */
   const notes = [];
   let added = 0;
-  for (const { event, matcher, timeout } of HOOK_EVENTS) {
+  for (const { event, matcher, timeout } of (statusLineOnly ? [] : HOOK_EVENTS)) {
     const existing = asList(settings.hooks[event]);
     if (!Array.isArray(settings.hooks[event]) && settings.hooks[event] != null) {
       notes.push(yellow(`hooks.${event} was not a list — left untouched`));
@@ -129,13 +147,29 @@ export function runInstall(argv = []) {
     added++;
   }
 
+  if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
   writeSettings(file, settings);
 
   process.stdout.write(`\n${bold('claude-for-poor-folks install')}\n`);
   process.stdout.write(`  file    ${file}\n`);
   if (bak) process.stdout.write(`  backup  ${dim(bak)}\n`);
   process.stdout.write(`  ${statusNote}\n`);
-  process.stdout.write(`  ${green(`${added} hook(s) added`)} ${dim(`(${HOOK_EVENTS.length - added} already present)`)}\n`);
+  if (statusLineOnly) {
+    process.stdout.write(`  ${dim('hooks left alone (--status-line-only)')}\n`);
+    // Without hooks from somewhere, the status line renders defaults forever.
+    const anyHooks = Object.values(settings.hooks || {}).some(v => Array.isArray(v) && v.some(isOurs));
+    if (!anyHooks) {
+      process.stdout.write(`  ${yellow('no hooks found in settings.json')} ${dim('— fine if the plugin supplies them; otherwise run a full `install` or the meter will never update')}\n`);
+    }
+  } else {
+    process.stdout.write(`  ${green(`${added} hook(s) added`)} ${dim(`(${HOOK_EVENTS.length - added} already present)`)}\n`);
+  }
+  const skill = statusLineOnly ? 'skipped' : installSkill(isGlobal);
+  if (skill === 'installed') process.stdout.write(`  ${green('skill added')} ${dim(`/${SKILL_DIR_NAME} — reads the report and names the habits to change (~500-900 tokens, only when you type it)`)}\n`);
+  else if (skill === 'present') process.stdout.write(`  ${dim(`skill /${SKILL_DIR_NAME} already present`)}\n`);
+  else if (skill === 'foreign') process.stdout.write(`  ${yellow(`a different skill already occupies /${SKILL_DIR_NAME} — left alone`)}\n`);
+  else if (skill === 'failed') process.stdout.write(`  ${yellow(`could not write the skill to ${skillPath(isGlobal)} — everything else is wired`)}\n`);
+
   for (const n of notes) process.stdout.write(`  ${n}\n`);
   if (warn) process.stdout.write(`  ${yellow(warn)}\n`);
   process.stdout.write(dim(`\n  Restart Claude Code (or /hooks) to pick it up.\n`));
@@ -166,6 +200,21 @@ export function runUninstall(argv = []) {
   if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
 
   writeSettings(file, settings);
+
+  // The skill was copied here by `install`; take it back out. Anything that does
+  // not look like ours stays, because it is not ours to delete.
+  const skill = skillPath(isGlobal);
+  try {
+    if (fs.existsSync(skill) && fs.readFileSync(skill, 'utf8').includes('poor-folks')) {
+      // Remove the file we wrote, then the directory only if nothing else is in
+      // it. Anything a user dropped alongside it is theirs.
+      fs.unlinkSync(skill);
+      const dir = path.dirname(skill);
+      if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+      removed++;
+    }
+  } catch { /* leave anything we are unsure about */ }
+
   process.stdout.write(`removed ${removed} entr${removed === 1 ? 'y' : 'ies'} from ${file}\n`);
   if (bak) process.stdout.write(dim(`backup: ${bak}\n`));
   process.stdout.write(dim(`Left alone: ${homeDir()} (session history) and .poor-folks.json (your budget).\n`));
@@ -190,7 +239,8 @@ export async function runDoctor(_argv = []) {
     if (!fs.existsSync(file)) { lines.push(dim(`      ${scope} settings: none (${file})`)); continue; }
     const s = readSettings(file);
     if (isOurs(s.statusLine)) { lines.push(ok(`${scope} statusLine wired`)); wiredSomewhere = true; }
-    else lines.push(dim(`      ${scope} statusLine: someone else's (left alone)`));
+    else if (s.statusLine) lines.push(dim(`      ${scope} statusLine: someone else's (left alone)`));
+    else lines.push(dim(`      ${scope} statusLine: empty`));
     const hooks = (s.hooks && typeof s.hooks === 'object' && !Array.isArray(s.hooks)) ? s.hooks : {};
     const events = Object.entries(hooks)
       .filter(([, v]) => Array.isArray(v) && v.some(isOurs))
@@ -226,8 +276,27 @@ export async function runDoctor(_argv = []) {
   lines.push(ok(`statusline renders in ${ms.toFixed(1)} ms`));
   lines.push(dim(`      sample output (made-up numbers, not your spend): ${line}`));
 
-  if (!wiredSomewhere) {
-    lines.push(note('nothing is wired yet — run: claude-for-poor-folks install'));
+  // What to advise depends on something this command cannot see. A plugin's
+  // hooks come from its manifest, not from settings.json, so an empty
+  // settings.json means either "plugin installed, status line missing" or
+  // "nothing installed at all" — and telling a plugin user to run a full
+  // install would wire all eight hooks a second time. So say both, and say why
+  // it cannot tell.
+  const slot = statusLineState();
+  const hooksInSettings = [false, true].some(g => {
+    const h = readSettings(settingsPath(g)).hooks;
+    return h && typeof h === 'object' && Object.values(h).some(v => Array.isArray(v) && v.some(isOurs));
+  });
+
+  if (slot !== 'ours' && hooksInSettings) {
+    lines.push(note(`hooks are wired but the status line is not — run: claude-for-poor-folks install${slot === 'foreign' ? ' --force' : ' --status-line-only'}`));
+  } else if (!wiredSomewhere) {
+    lines.push(note('nothing is wired in settings.json.'));
+    lines.push(dim('      If you installed the plugin, its hooks come from the plugin manifest and are'));
+    lines.push(dim('      invisible here; you only need the status line:'));
+    lines.push(dim('        claude-for-poor-folks install --status-line-only'));
+    lines.push(dim('      Otherwise you need everything:'));
+    lines.push(dim('        claude-for-poor-folks install'));
   }
 
   process.stdout.write(lines.join('\n') + '\n');

@@ -149,3 +149,87 @@ test('Stop waits for the transcript to settle, so the final turn is not lost', (
   assert.equal(readSessionState('settle').tokens.output, 350, 'the late-arriving turn must be included');
   assert.ok(home);
 });
+
+
+test('a plugin install is told once how to get the status line, and then left alone', () => {
+  // A plugin manifest cannot declare a status line. Rather than write one into
+  // someone's settings behind their back, say it once and hand over the command.
+  const home = tmpHome();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorfolks-nudge-'));
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.json'), '{}');
+  /** @type {Partial<import('../src/types.js').HookPayload>} */
+  const base = { session_id: 'n1', cwd: dir, source: 'startup' };
+
+  const first = handle('SessionStart', base).systemMessage || '';
+  assert.match(first, /claude-for-poor-folks install/, 'the first session should say how');
+
+  const second = handle('SessionStart', { ...base, session_id: 'n2' }).systemMessage || '';
+  assert.ok(!/claude-for-poor-folks install/.test(second), 'the second must not repeat it');
+  assert.match(second, /budget/, 'but the normal banner stays');
+  assert.ok(home);
+});
+
+test('nothing is said when the status line is already wired', () => {
+  const home = tmpHome();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorfolks-wired-'));
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.json'),
+    JSON.stringify({ statusLine: { type: 'command', command: 'node x statusline #poor-folks' } }));
+
+  const msg = handle('SessionStart', /** @type {Partial<import('../src/types.js').HookPayload>} */ ({ session_id: 'w1', cwd: dir, source: 'startup' })).systemMessage || '';
+  assert.ok(!/one more step/.test(msg));
+  assert.ok(home);
+});
+
+
+test('the status line slot is read as ours, someone else\'s, or empty', async () => {
+  const { statusLineState } = await import('../src/io/wiring.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorfolks-slot-'));
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  const settings = path.join(dir, '.claude', 'settings.json');
+
+  fs.writeFileSync(settings, '{}');
+  assert.equal(statusLineState(dir), 'none');
+
+  fs.writeFileSync(settings, JSON.stringify({ statusLine: { type: 'command', command: 'their-own.sh' } }));
+  assert.equal(statusLineState(dir), 'foreign', 'a status line we did not write is theirs');
+
+  fs.writeFileSync(settings, JSON.stringify({ statusLine: { type: 'command', command: 'node x statusline #poor-folks' } }));
+  assert.equal(statusLineState(dir), 'ours');
+});
+
+test('someone running their own status line is never nudged', () => {
+  // `install` refuses to replace it, so the advice could not work anyway.
+  const home = tmpHome();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'poorfolks-foreign-'));
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.json'),
+    JSON.stringify({ statusLine: { type: 'command', command: 'their-own.sh' } }));
+
+  const msg = handle('SessionStart', /** @type {Partial<import('../src/types.js').HookPayload>} */ (
+    { session_id: 'f1', cwd: dir, source: 'startup' })).systemMessage || '';
+  assert.ok(!/one more step/.test(msg));
+  assert.ok(home);
+});
+
+test('the notice is once per project, so a second repository still hears it', () => {
+  // Per-machine was wrong: the usual fix is a project-scoped install, which
+  // leaves every other repository without a meter and never mentions it again.
+  const home = tmpHome();
+  const mk = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'poorfolks-proj-'));
+    fs.mkdirSync(path.join(d, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.claude', 'settings.json'), '{}');
+    return d;
+  };
+  const a = mk(), b = mk();
+  const say = (/** @type {string} */ dir, /** @type {string} */ id) =>
+    handle('SessionStart', /** @type {Partial<import('../src/types.js').HookPayload>} */ (
+      { session_id: id, cwd: dir, source: 'startup' })).systemMessage || '';
+
+  assert.match(say(a, '1'), /one more step/, 'first project, first time');
+  assert.ok(!/one more step/.test(say(a, '2')), 'same project again: silent');
+  assert.match(say(b, '3'), /one more step/, 'a different project still gets told');
+  assert.ok(home);
+});

@@ -38,6 +38,7 @@
   "files": [
     "src",
     "skills",
+    "bin",
     ".claude-plugin",
     "docs/demo.svg",
     "README.md",

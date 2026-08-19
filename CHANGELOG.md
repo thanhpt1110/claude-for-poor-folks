@@ -28,12 +28,34 @@ Initial public release.
     front of a model, at roughly 500–900 tokens, and its description says so before you run it.
     A test fails if that guard is ever removed.
 
+- `doctor` now says what is actually there and what to do about it. It called an empty
+  status-line slot "someone else's", and it told anyone with nothing in `settings.json` to run
+  a full `install` — which, for someone who installed the plugin, would wire all eight hooks a
+  second time. It cannot see a plugin's hooks (they live in the manifest), so it now says so
+  and gives both commands with the reason for each.
+- `install --status-line-only` — adds the status line without touching hooks. A plugin
+  already supplies the hooks from its manifest, where nothing here can see them to skip, so a
+  full install would wire all eight a second time: doubled banners, doubled latency, and a
+  daily total inflated by two `Stop` hooks appending the same delta.
+- Feature parity between the two install routes. npm users get the review skill (`install`
+  copies it in, `uninstall` takes it back out, and a file it did not write is never touched);
+  plugin users get the CLI on their PATH through `bin/`, and are told **once** that the status
+  line needs one more command. A plugin manifest cannot declare a status line, so rather than
+  edit someone's `settings.json` unasked, the tool states the gap and hands over the command —
+  once per project, and never to someone already running a status line of their own, since
+  `install` would refuse to replace it.
+
 ### Fixed
 
 - `report --json` embedded ANSI colour codes inside JSON strings. Findings are now structured
   (`{ code, severity, message, data }`) and carry no colour; the text renderer adds it.
 - Per-model cost showed `$0.00` when no prices were configured, next to a session total of
   several dollars — "not known" rendered as "nothing". It now reports `null` and shows tokens.
+- `install --status-line-only` warns when nothing in `settings.json` supplies the hooks, since
+  a status line without them renders defaults forever, and no longer leaves an empty `hooks`
+  key behind.
+- One-time notice flags are pruned on the same schedule as session state instead of
+  accumulating one file per project seen, and `SECURITY.md` now discloses that they are written.
 
 ### Notes on Claude Code's undocumented behaviour
 

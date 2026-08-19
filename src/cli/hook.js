@@ -30,6 +30,7 @@ import { decide, newSignals, permissionFor } from '../core/policy.js';
 import { signalBlock, money } from '../core/format.js';
 import { detectProfile, shouldAsk } from '../core/detect.js';
 import { resolveProfiles } from '../core/profiles.js';
+import { statusLineState, noticeAlreadyShown } from '../io/wiring.js';
 
 /** Sync sleep. Hooks are synchronous by nature and this is bounded and short. */
 /** @param {number} ms */
@@ -204,11 +205,26 @@ export function handle(event, payload) {
       if (config.quiet) return {};
       // systemMessage is shown to the human and is NOT visible to the model
       // (measured), so it is free. Clarity costs nothing here.
-      return {
-        systemMessage:
-          `[poor-folks] budget ${money(limits.sessionUsd)} · profile ${state.profile || 'auto'} · on-limit ${config.onLimit}` +
-          `${config.unattended ? ' · unattended' : ''}${config.askProfile ? '' : ' · adds 0 tokens'}`
-      };
+      const banner = [
+        `[poor-folks] budget ${money(limits.sessionUsd)} · profile ${state.profile || 'auto'} · on-limit ${config.onLimit}` +
+        `${config.unattended ? ' · unattended' : ''}${config.askProfile ? '' : ' · adds 0 tokens'}`
+      ];
+      // These hooks are clearly running or this code would not be executing, so
+      // a missing status line means this is a plugin install: a plugin manifest
+      // cannot declare one. Say it once, hand over the command, then never
+      // mention it again. Writing it into their settings unasked is not this
+      // tool's decision to make.
+      // Only when the slot is empty. Someone running their own status line made a
+      // choice, and `install` will not overwrite it, so nudging them would be
+      // advice that cannot work.
+      // Order matters: the flag is one stat, the state check reads two JSON
+      // files. Once this project has been told, the cheap check short-circuits
+      // and the session never touches settings.json again.
+      if (!noticeAlreadyShown('statusline', cwd, { peek: true }) && statusLineState(cwd) === 'none'
+          && !noticeAlreadyShown('statusline', cwd)) {
+        banner.push('[poor-folks] the live meter needs one more step: run `claude-for-poor-folks install --status-line-only`. A plugin cannot declare a status line, and that flag adds only the missing piece — a full install would wire the hooks a second time. Said once per project; `doctor` will tell you any time.');
+      }
+      return { systemMessage: banner.join('\n') };
     }
 
     case 'UserPromptSubmit': {

@@ -86,13 +86,24 @@ claude-for-poor-folks install    # wires the status line + hooks
 /plugin install poor-folks@poor-folks
 ```
 
-A plugin manifest can declare hooks but **not** a status line. You get the gate, the warnings
-and the report; for the always-on traffic light, run `install` as above.
+Both routes end up with the same features, by different paths:
 
-The plugin also carries one skill, `/poor-folks:review`. It reads the report and tells you
-which habits are costing money. It runs **only when you type it** — never on its own — and
-it is the only part of this package that puts anything in front of a model, at roughly
-500–900 tokens. Everything else stays on the channel the model cannot read.
+| | via npm | via plugin |
+|---|---|---|
+| hooks, gate, warnings, `report` | ✅ | ✅ |
+| the CLI on your PATH | npm installs it | the plugin ships `bin/`, so it is there too |
+| the review skill | `install` copies it in, as `/poor-folks-review` | comes with the plugin, as `/poor-folks:review` |
+| **status line** | `install` wires it | `install --status-line-only`, once |
+
+A plugin manifest cannot declare a status line — a limit of the format, not a decision. So a
+plugin install says so **once per project**, hands you that command, and never mentions it
+again. Use the flag: a full `install` would write the eight hooks a second time, because the
+plugin's copies live in its manifest rather than in `settings.json` and nothing here can see
+them to skip.
+
+It will not edit your `settings.json` on its own. You installed a plugin, not a licence to
+rewrite your config. And if you already run your own status line, it stays — `install` will
+not replace it, so nothing nags you to run a command that would not work.
 </details>
 
 ---
@@ -102,12 +113,12 @@ it is the only part of this package that puts anything in front of a model, at r
 | | | |
 |---|---|---|
 | ⚙️ | `init` | set the budget for this repo |
-| 🔌 | `install` | wire the status line + hooks |
+| 🔌 | `install` | wire the status line + hooks *(`--status-line-only` if you came via the plugin)* |
 | 📊 | `report` | where the money went, and which habit caused it |
 | 👀 | `status` | current config + live sessions |
 | 🩺 | `doctor` | check the wiring |
 | 🧹 | `uninstall` | undo `install` |
-| 🔍 | `/poor-folks:review` | *(plugin only)* have Claude read the report and name the habits to change — costs ~500–900 tokens, runs only when you type it |
+| 🔍 | `/poor-folks-review` | have Claude read the report and name the habits to change — ~500–900 tokens, runs only when you type it. Installed as `/poor-folks:review` if you came via the plugin |
 
 ```
 $ claude-for-poor-folks report

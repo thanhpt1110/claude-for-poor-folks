@@ -371,6 +371,17 @@ export function todaySpend(cwd = null, now = Date.now()) {
 
 /** @param {number} [now] */
 export function pruneOldSessions(now = Date.now()) {
+  // Notice flags are one small file per project ever seen. Left alone they only
+  // grow, so they age out on the same schedule as everything else.
+  try {
+    const notices = path.join(homeDir(), 'notices');
+    const cutoff = now - SESSION_TTL_MS;
+    for (const f of fs.readdirSync(notices)) {
+      const p = path.join(notices, f);
+      if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
+    }
+  } catch { /* none yet */ }
+
   try {
     const dir = sessionsDir();
     const cutoff = now - SESSION_TTL_MS;
