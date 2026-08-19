@@ -2,7 +2,15 @@
 <p align="center"><b>Know what your agent is spending — while it spends it.</b></p>
 <p align="center">
 A budget gate for <a href="https://claude.com/claude-code">Claude Code</a>.<br>
-Free · zero runtime dependencies · fully local · adds nothing to your token bill
+Free · fully local · adds nothing to your token bill
+</p>
+
+<p align="center">
+  <a href="https://github.com/thanhpt1110/claude-for-poor-folks/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/thanhpt1110/claude-for-poor-folks/ci.yml?branch=main&label=ci&style=flat-square"></a>
+  <img alt="runtime dependencies: 0" src="https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square">
+  <img alt="tokens added to your conversation: 0" src="https://img.shields.io/badge/tokens%20added-0-brightgreen?style=flat-square">
+  <img alt="node >= 20" src="https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen?style=flat-square">
+  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square">
 </p>
 
 <p align="center"><img src="docs/demo.svg" alt="the cost meter going green, amber, red as a retry loop burns the budget" width="900"><br><sub><i>illustration of one session</i></sub></p>
@@ -86,14 +94,14 @@ and the report; for the always-on traffic light, run `install` as above.
 
 ## Commands
 
-| | |
-|---|---|
-| `init` | set the budget for this repo |
-| `install` | wire the status line + hooks |
-| `report` | where the money went, and which habit caused it |
-| `status` | current config + live sessions |
-| `doctor` | check the wiring |
-| `uninstall` | undo `install` |
+| | | |
+|---|---|---|
+| ⚙️ | `init` | set the budget for this repo |
+| 🔌 | `install` | wire the status line + hooks |
+| 📊 | `report` | where the money went, and which habit caused it |
+| 👀 | `status` | current config + live sessions |
+| 🩺 | `doctor` | check the wiring |
+| 🧹 | `uninstall` | undo `install` |
 
 ```
 $ claude-for-poor-folks report
@@ -113,16 +121,16 @@ where it leaks
 
 ## What it watches
 
-| signal | catches |
-|---|---|
-| **budget** | 50% / 80% / over, per session |
-| **daily budget** | four tmux panes, each under $1, still spend $4 |
-| **burn rate** | $/min over 60s — a runaway loop, minutes before the cap |
-| **quota** | 5-hour and weekly windows |
-| **context** | compaction approaching — an expensive event, not a free one |
-| **cache health** | read ratio; cache reads cost ~1/10 of fresh input |
-| **fan-out** | subagents spawned, the fastest way to multiply spend |
-| **blind meter** | Claude Code sent a payload this version doesn't understand |
+| | signal | catches |
+|---|---|---|
+| 💰 | **budget** | 50% / 80% / over, per session |
+| 📅 | **daily budget** | four tmux panes, each under $1, still spend $4 |
+| 🔥 | **burn rate** | $/min over 60s — a runaway loop, minutes before the cap |
+| ⏳ | **quota** | 5-hour and weekly windows |
+| 🧠 | **context** | compaction approaching — an expensive event, not a free one |
+| ♻️ | **cache health** | read ratio; cache reads cost ~1/10 of fresh input |
+| 🌱 | **fan-out** | subagents spawned, the fastest way to multiply spend |
+| 🕶️ | **blind meter** | Claude Code sent a payload this version doesn't understand |
 
 Two things it will never do:
 
@@ -337,6 +345,12 @@ output of `doctor` — it contains no private data.
 - **No runtime dependencies.** Contributors get `typescript` and `@types/node` for the type
   check; nobody who installs the tool downloads them.
 
+## Contributing
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to run the tests, add a language, and release
+- [SECURITY.md](SECURITY.md) — what it reads, what it writes, and how to verify that yourself
+- Issues and pull requests have templates; the PR one asks whether the rules above still hold
+
 ## License
 
-MIT · [CONTRIBUTING.md](CONTRIBUTING.md)
+MIT

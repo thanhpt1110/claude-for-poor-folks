@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a signal, a command, or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What went wrong that this would have prevented
+      description: >
+        Concrete beats abstract. "I burned $12 overnight and only found out in the
+        morning" tells us more than "it should have alerts".
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like it to do
+
+  - type: dropdown
+    id: rules
+    attributes:
+      label: Does it fit the rules the tool is held to?
+      description: >
+        Never break a session · never block a tool call · never spend your tokens ·
+        never touch the prompt · never ship a price table · never fail towards zero ·
+        never phone home.
+      options:
+        - "Yes, it fits all of them"
+        - "It bends one, and here is why that is worth it"
+        - "Not sure"
+    validations:
+      required: true

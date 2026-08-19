@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How much did I spend?
+    url: https://github.com/ccusage/ccusage
+    about: For usage reports across agents, ccusage answers that better. This tool is the budget gate.
+  - name: Claude Code itself
+    url: https://github.com/anthropics/claude-code/issues
+    about: For hooks, the status line, or transcripts behaving oddly at the source.

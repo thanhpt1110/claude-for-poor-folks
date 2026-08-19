@@ -1,0 +1,51 @@
+name: Bug report
+description: Something behaved differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The single most useful thing you can paste is the
+        output of `claude-for-poor-folks doctor` — it contains no private data.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        I ran `claude-for-poor-folks install` in a fresh repo, restarted Claude Code,
+        and no status line appeared.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `claude-for-poor-folks doctor`
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`claude-for-poor-folks --version`, `claude --version`, `node --version`, and your OS"
+      placeholder: "0.1.1 / 2.1.235 / v22.11.0 / macOS 15"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Your `.poor-folks.json`, if you have one
+      render: json
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I restarted Claude Code after `install`
+        - label: This is about this tool, not about Claude Code's own cost reporting
