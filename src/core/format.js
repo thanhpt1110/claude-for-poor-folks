@@ -88,7 +88,7 @@ export function statusLine(state, decision, limits) {
  * @param {import('../types.js').Signal[]} signals
  * @param {{ prefix?: string }} [opts]
  */
-export function signalBlock(signals, { prefix = 'claude-for-poor-folks' } = {}) {
+export function signalBlock(signals, { prefix = 'poor-folks' } = {}) {
   if (!signals.length) return '';
   const lines = signals.map(s => {
     const mark = s.level === 'critical' ? '!!' : s.level === 'warn' ? '!' : '-';

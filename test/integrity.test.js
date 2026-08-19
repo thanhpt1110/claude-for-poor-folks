@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmpHome } from './helpers.js';
 import { handle } from '../src/cli/hook.js';
+import { writeSnapshot, emptySnapshot } from '../src/io/state.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, '..', 'src');
@@ -103,4 +104,32 @@ test('an unknown command prints help and does not pretend to have worked', () =>
   const r = run(['nonsense-command'], '');
   assert.equal(r.code, 0);
   assert.match(r.stdout, /Usage/);
+});
+
+test('every message the tool prints carries the same prefix', () => {
+  // A package-wide rename left `signalBlock` defaulting to one prefix while the
+  // hook's own notes used another, so a single session printed both
+  // "[poor-folks]" and "[claude-for-poor-folks]". Nobody reads their own output
+  // closely enough to catch that; a test does.
+  tmpHome();
+  /** @type {Partial<import('../src/types.js').HookPayload>} */
+  const base = { session_id: 'prefix', cwd: os.tmpdir(), source: 'startup' };
+  handle('SessionStart', base);
+  handle('UserPromptSubmit', { ...base, prompt: 'fix the bug in auth.ts' });
+
+  writeSnapshot({ ...emptySnapshot('prefix'), costUsd: 5 });
+
+  const messages = [
+    handle('SessionStart', base).systemMessage,
+    handle('PreToolUse', { ...base, tool_name: 'Bash' }).systemMessage,
+    handle('PreCompact', base).systemMessage
+  ].filter(Boolean);
+
+  assert.ok(messages.length >= 2, 'expected the tool to say something');
+  for (const m of messages) {
+    const prefixes = [...String(m).matchAll(/\[([a-z-]+)\]/g)].map(x => x[1]);
+    for (const p of prefixes) {
+      assert.equal(p, 'poor-folks', `printed "[${p}]" — the tool must speak with one name`);
+    }
+  }
 });
