@@ -37,10 +37,6 @@ Initial public release.
   already supplies the hooks from its manifest, where nothing here can see them to skip, so a
   full install would wire all eight a second time: doubled banners, doubled latency, and a
   daily total inflated by two `Stop` hooks appending the same delta.
-- Feature parity between the two install routes, with one honest exception: the `bin/` shim a
-  plugin puts on the Bash tool's PATH is a `sh` script, verified on Linux and macOS. No Windows
-  machine was available to test it, so nothing claims it works there — Windows users install
-  through npm.
 - Feature parity between the two install routes. npm users get the review skill (`install`
   copies it in, `uninstall` takes it back out, and a file it did not write is never touched);
   plugin users get the CLI on their PATH through `bin/`, and are told **once** that the status
@@ -48,6 +44,10 @@ Initial public release.
   edit someone's `settings.json` unasked, the tool states the gap and hands over the command —
   once per project, and never to someone already running a status line of their own, since
   `install` would refuse to replace it.
+  One honest exception to that parity: the `bin/` shim is a `sh` script, exercised by the
+  suite on Linux and macOS only. On Windows it is skipped rather than assumed, so plugin users
+  there should install through npm — a route whose entry point (`src/cli/index.js`, run through
+  npm's own shim) *is* covered by the Windows CI jobs.
 
 ### Fixed
 
