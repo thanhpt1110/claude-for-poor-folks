@@ -6,6 +6,7 @@ Free · fully local · adds nothing to your token bill
 </p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/claude-for-poor-folks"><img alt="npm version" src="https://img.shields.io/npm/v/claude-for-poor-folks?style=flat-square&color=cb3837&logo=npm&logoColor=white"></a>
   <a href="https://github.com/thanhpt1110/claude-for-poor-folks/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/thanhpt1110/claude-for-poor-folks/ci.yml?branch=main&label=ci&style=flat-square"></a>
   <img alt="runtime dependencies: 0" src="https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square">
   <img alt="token overhead: none" src="https://img.shields.io/badge/token%20overhead-none-brightgreen?style=flat-square">
