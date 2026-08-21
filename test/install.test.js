@@ -212,7 +212,13 @@ test('a full install still wires everything', () => {
     fs.writeFileSync(settings, '{}');
     quiet(() => runInstall([]));
     const after = JSON.parse(fs.readFileSync(settings, 'utf8'));
-    assert.equal(Object.keys(after.hooks).length, 8);
+    // A count told you a number changed; it never told you WHICH event went
+    // missing. The list does, and it is the thing that has to stay in step with
+    // the plugin manifest.
+    assert.deepEqual(Object.keys(after.hooks).sort(), [
+      'PostToolUse', 'PreCompact', 'PreToolUse', 'SessionEnd', 'SessionStart',
+      'Stop', 'SubagentStart', 'SubagentStop', 'UserPromptSubmit'
+    ]);
     assert.ok(after.statusLine);
     assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'poor-folks-review', 'SKILL.md')));
   } finally { process.chdir(cwd); }
@@ -364,4 +370,22 @@ test('doctor stays quiet when the config is correct', async () => {
     const out = await capture(() => runDoctor([]));
     assert.ok(!/not a setting/.test(out), 'nothing is wrong, so nothing is said');
   } finally { process.chdir(cwd); restoreHome(prevHome); }
+});
+
+test('both install routes declare the same hooks', () => {
+  // The npm route reads HOOK_EVENTS in install.js; the plugin route reads
+  // .claude-plugin/plugin.json. They are edited by hand, in different files, and
+  // nothing connected them — so adding an event to one and forgetting the other
+  // gave plugin users a quietly different tool. Whichever way you installed it,
+  // the same things must run.
+  const cwd = process.cwd();
+  try {
+    const { settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    quiet(() => runInstall([]));
+    const viaNpm = Object.keys(JSON.parse(fs.readFileSync(settings, 'utf8')).hooks).sort();
+    const manifest = JSON.parse(fs.readFileSync(path.join(HERE_INSTALL, '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+    const viaPlugin = Object.keys(manifest.hooks).sort();
+    assert.deepEqual(viaPlugin, viaNpm, 'plugin.json and HOOK_EVENTS have drifted apart');
+  } finally { process.chdir(cwd); }
 });

@@ -18,7 +18,7 @@ import path from 'node:path';
 import { readLedger, ledgerFile, listRecentSessions, effectiveCost } from '../io/state.js';
 import { loadConfig, effectiveLimits, homeDir } from '../io/config.js';
 import { readSessionTotals, cacheReadRatio, estimateCost } from '../io/transcript.js';
-import { money, humanTokens, bold, dim, green, yellow, red } from '../core/format.js';
+import { money, humanTokens, humanBytes, bold, dim, green, yellow, red } from '../core/format.js';
 import { decide } from '../core/policy.js';
 
 /** @param {unknown} x */
@@ -151,6 +151,24 @@ function table(title, groups, total, { showTokens = false } = {}) {
 }
 
 /**
+ * A session's re-sends worked out from its rows, for ledger entries written
+ * before `repeatTotals` existed. Capped at the rows the ledger kept, which is the
+ * best that can be said about a row that did not record its own total.
+ *
+ * @param {{tool: string, count: number, bytes: number}[]|undefined} rows
+ */
+function fromRows(rows) {
+  let resent = 0;
+  let bytes = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || !(r.count > 1)) continue;
+    resent += r.count - 1;
+    bytes += r.bytes * (r.count - 1) / r.count;
+  }
+  return { resent, bytes: Math.round(bytes) };
+}
+
+/**
  * The part people act on. Thresholds come from config, so the retrospective view
  * and the live warnings can never drift apart.
  *
@@ -198,6 +216,50 @@ function leaks(sessions, limits) {
       });
     }
   }
+  // The one form of waste nothing else can see. The transcript records that a
+  // file was read; it never records that the same file was read forty times.
+  // Each row is one input to one tool, so `count` is a true identical-call count.
+  // Grouping them by tool first — an earlier draft did — turns "Read /a.txt 3x and
+  // /b.txt 2x" into "Read, 5 identical calls", which is three separate untruths:
+  // the two files are not identical, five calls are not five re-sends, and the
+  // first call of each was work rather than waste.
+  const rows = sessions.flatMap(s2 => Array.isArray(s2.repeats) ? s2.repeats : []);
+  const wasted = rows.filter(r => r && r.count > 1).map(r => ({
+    tool: r.tool,
+    count: r.count,
+    // The first call had to happen. Only the ones after it were re-sent, and the
+    // byte total covers every call, so charge the repeats their share of it.
+    resent: r.count - 1,
+    bytes: Math.round(r.bytes * (r.count - 1) / r.count)
+  }));
+  if (wasted.length) {
+    const ranked = [...wasted].sort((a, b) => b.bytes - a.bytes);
+    // Prefer the session's own uncapped totals. The rows are the largest twelve
+    // groups, so summing them reports twelve re-sends for a session that made
+    // fifteen. Older rows have no totals; fall back to the rows for those.
+    // Per session, not per window. Choosing one branch for the whole window meant
+    // that a single session carrying totals silenced every other session's
+    // re-sends — while they were still counted in the span and still named as the
+    // worst, so the sentence contradicted itself: a total of 1 beside "called 20
+    // times identically".
+    const counted = sessions.reduce((a, s2) => {
+      const own = s2.repeatTotals || fromRows(s2.repeats);
+      return { resent: a.resent + own.resent, bytes: a.bytes + own.bytes };
+    }, { resent: 0, bytes: 0 });
+    const span = new Set(sessions.filter(s2 => (s2.repeatTotals?.resent ?? 0) > 0
+      || (Array.isArray(s2.repeats) && s2.repeats.some(r => r && r.count > 1))).map(s2 => s2.sessionId)).size;
+    const top = ranked[0];
+    out.push({
+      code: 'repeat-calls', severity: 'warn',
+      // "a second time" was wrong for any group called more than twice, and sat
+      // in the same sentence as "called 10 times identically". And the figure
+      // spans the whole window, so it cannot be attributed to "the session" —
+      // every other leak here says "N session(s)".
+      message: `${counted.resent} tool call(s) re-sent input that had already been sent, ${humanBytes(counted.bytes)} moved again, across ${span} session(s). Worst single input: ${top.tool}, called ${top.count} times identically. What was in it is deliberately not recorded.`,
+      data: { resent: counted.resent, bytes: counted.bytes, sessions: span, worst: ranked.slice(0, 5) }
+    });
+  }
+
   const over = sessions.filter(s => num(s.budgetUsd) > 0 && costOf(s) > num(s.budgetUsd));
   if (over.length) out.push({
     code: 'over-budget', severity: 'warn',
@@ -273,6 +335,23 @@ export function runReport(argv = []) {
     const amount = total > 0 ? money(costOf(s)) : `${humanTokens(tokensOf(s))} tok`;
     out.push(`  ${amount.padStart(9)}  ${dim(String(s.ts || '').slice(0, 16))}  ${String(s.profile || '?').padEnd(9)} ` +
       dim(`${num(s.promptCount)} prompts · ${num(s.toolCount)} tools · ${num(s.subagentCount)} subagents${s.partial ? ' · still open' : ''}`));
+  }
+
+  /** @type {Record<string, {calls: number, bytes: number, ms: number}>} */
+  const tools = {};
+  for (const s2 of sessions) {
+    for (const [name, t] of Object.entries(s2.toolStats || {})) {
+      const e = tools[name] || (tools[name] = { calls: 0, bytes: 0, ms: 0 });
+      e.calls += t.calls; e.bytes += t.bytes; e.ms += t.ms;
+    }
+  }
+  const byBytes = Object.entries(tools).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 8);
+  if (byBytes.length) {
+    out.push('\n' + bold('which tools moved the bytes'));
+    out.push(dim('  measured at the hook, not inferred from the transcript'));
+    for (const [name, t] of byBytes) {
+      out.push(`  ${humanBytes(t.bytes).padStart(9)}  ${String(t.calls).padStart(5)} calls  ${dim((t.ms / 1000).toFixed(1) + 's')}  ${name}`);
+    }
   }
 
   const l = leaks(sessions, limits);

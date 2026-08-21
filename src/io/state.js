@@ -103,6 +103,12 @@ export function emptyState(sessionId) {
     toolCount: 0,
     subagentCount: 0,
     compactCount: 0,
+    // Per-tool attribution. The transcript says how much a session cost; this
+    // says which tools the bytes came from, which is the part a user can act on.
+    toolStats: {},
+    // Identical calls, keyed by tool + a hash of its input. Reading the same
+    // file forty times costs forty times, and nothing else surfaces it.
+    repeats: {},
     tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, messages: 0 },
     byModel: {},
     estCostUsd: null,

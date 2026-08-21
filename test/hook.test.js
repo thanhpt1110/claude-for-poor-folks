@@ -233,3 +233,113 @@ test('the notice is once per project, so a second repository still hears it', ()
   assert.match(say(b, '3'), /one more step/, 'a different project still gets told');
   assert.ok(home);
 });
+
+test('PostToolUse attributes bytes to the tool that moved them', () => {
+  const home = tmpHome();
+  /**
+   * @param {string} tool
+   * @param {any} input
+   * @param {number} respBytes
+   */
+  const post = (tool, input, respBytes) => handle('PostToolUse', {
+    hook_event_name: 'PostToolUse', session_id: 'attr', cwd: home,
+    tool_name: tool, tool_input: input, duration_ms: 10
+  }, respBytes);
+  post('Read', { file_path: '/a.txt' }, 1000);
+  post('Read', { file_path: '/a.txt' }, 1000);
+  post('Bash', { command: 'ls' }, 50);
+  const s = readSessionState('attr');
+  assert.equal(s.toolStats?.Read.calls, 2);
+  assert.equal(s.toolStats?.Read.bytes, 2000);
+  assert.equal(s.toolStats?.Bash.calls, 1);
+  const repeat = Object.values(s.repeats || {}).find(r => r.tool === 'Read');
+  assert.equal(repeat?.count, 2, 'the same file read twice is counted as a repeat');
+  const once = Object.values(s.repeats || {}).find(r => r.tool === 'Bash');
+  assert.equal(once?.count, 1, 'and a single call is recorded but is not waste');
+});
+
+test('different inputs to the same tool are not called repeats', () => {
+  const home = tmpHome();
+  for (const f of ['/a.txt', '/b.txt', '/c.txt']) {
+    handle('PostToolUse', {
+      hook_event_name: 'PostToolUse', session_id: 'distinct', cwd: home,
+      tool_name: 'Read', tool_input: { file_path: f }
+    }, 100);
+  }
+  const s = readSessionState('distinct');
+  assert.equal(s.toolStats?.Read.calls, 3);
+  const counts = Object.values(s.repeats || {}).map(r => r.count);
+  assert.deepEqual(counts, [1, 1, 1], 'three different files are three different calls');
+});
+
+test('PostToolUse never reads the transcript', () => {
+  // It fires after every tool call. Metering there would make the meter itself
+  // the most expensive thing in the session.
+  const home = tmpHome();
+  const transcript = path.join(home, 'fake.jsonl');
+  fs.writeFileSync(transcript, JSON.stringify({
+    type: 'assistant', message: { id: 'm1', model: 'claude-opus-5', usage: { output_tokens: 9999 } }
+  }) + '\n');
+  handle('PostToolUse', {
+    hook_event_name: 'PostToolUse', session_id: 'notranscript', cwd: home,
+    transcript_path: transcript, tool_name: 'Read', tool_input: { file_path: '/x' }
+  }, 10);
+  const s = readSessionState('notranscript');
+  assert.deepEqual(s.transcriptOffsets, {}, 'it must not have opened the transcript');
+  assert.equal(s.tokens.output, 0);
+});
+
+test('measureTools: false turns the whole thing off', () => {
+  const home = tmpHome();
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ measureTools: false }));
+  const res = handle('PostToolUse', {
+    hook_event_name: 'PostToolUse', session_id: 'off', cwd: home,
+    tool_name: 'Read', tool_input: { file_path: '/x' }
+  }, 5000);
+  assert.deepEqual(res, {});
+  // readSessionState hands back a fresh emptyState when no file was written, so
+  // the field exists and is empty — which is the point: nothing was recorded.
+  const s = readSessionState('off');
+  assert.deepEqual(Object.keys(s.toolStats || {}), [], 'nothing recorded');
+  assert.deepEqual(Object.keys(s.repeats || {}), []);
+});
+
+test('PostToolUse adds nothing to the conversation', () => {
+  const home = tmpHome();
+  const res = handle('PostToolUse', {
+    hook_event_name: 'PostToolUse', session_id: 'quiet', cwd: home,
+    tool_name: 'Read', tool_input: { file_path: '/x' }
+  }, 100);
+  assert.equal(res.hookSpecificOutput?.additionalContext, undefined);
+  assert.equal(/** @type {any} */ (res).additionalContext, undefined);
+  assert.equal(res.systemMessage, undefined, 'and it does not even talk to the human');
+});
+
+test('the byte count is bytes, on the real stdin path', async () => {
+  // Every other test here calls handle() with an explicit byte count, which is
+  // exactly why this bug survived: the conversion happens in main(), between
+  // stdin and handle(). `input.length` counts UTF-16 code units, so 100 '✓'
+  // (3 bytes each) plus 50 '😀' (4 bytes each) were reported as 355 instead of
+  // 655 — a figure printed under the word "bytes" everywhere it surfaces.
+  const home = tmpHome();
+  const payload = JSON.stringify({
+    hook_event_name: 'PostToolUse', session_id: 'utf8', cwd: home,
+    tool_name: 'Read', tool_input: { file_path: '/unicode.txt' },
+    tool_response: '✓'.repeat(100) + '😀'.repeat(50)
+  });
+  assert.ok(Buffer.byteLength(payload) > payload.length, 'the fixture must actually be multibyte');
+
+  const cli = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'cli', 'index.js');
+  await new Promise((resolve, reject) => {
+    const p = spawn(process.execPath, [cli, 'hook'], {
+      env: { ...process.env, POOR_FOLKS_HOME: home }, stdio: ['pipe', 'ignore', 'ignore']
+    });
+    p.on('error', reject);
+    p.on('close', () => resolve(undefined));
+    p.stdin.end(payload);
+  });
+
+  const state = JSON.parse(fs.readFileSync(path.join(home, 'sessions', 'utf8.state.json'), 'utf8'));
+  assert.equal(state.toolStats.Read.bytes, Buffer.byteLength(payload));
+  assert.notEqual(state.toolStats.Read.bytes, payload.length, 'and not the UTF-16 length');
+});

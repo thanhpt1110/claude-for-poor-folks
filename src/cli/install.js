@@ -25,6 +25,7 @@ const HOOK_EVENTS = [
   { event: 'SessionStart', matcher: null, timeout: 5 },
   { event: 'UserPromptSubmit', matcher: null, timeout: 5 },
   { event: 'PreToolUse', matcher: '*', timeout: 3 },
+  { event: 'PostToolUse', matcher: '*', timeout: 3 },
   { event: 'SubagentStart', matcher: null, timeout: 3 },
   { event: 'SubagentStop', matcher: null, timeout: 5 },
   { event: 'PreCompact', matcher: null, timeout: 3 },
@@ -235,6 +236,13 @@ export async function runDoctor(_argv = []) {
   // prevent, so it is reported here at the same severity `status` uses.
   const cfg = loadConfig(process.cwd());
   for (const w of cfg._warnings || []) lines.push(note(w));
+
+  // Per-tool attribution is a second hook process on every tool call. That is
+  // latency the user is paying for a feature, so it is stated as a number here
+  // rather than left for them to notice.
+  lines.push(cfg.measureTools
+    ? note('per-tool attribution is on: one extra hook per tool call (~43 ms measured, of which ~29 ms is node starting). Turn it off with "measureTools": false.')
+    : dim('      per-tool attribution: off ("measureTools": false) — report cannot show which tools moved the bytes'));
   if ((cfg._warnings || []).length && cfg._sources) {
     if (cfg._sources.repo) lines.push(dim(`      repo config:   ${cfg._sources.repo}`));
     lines.push(dim(`      global config: ${cfg._sources.global}`));

@@ -5,6 +5,46 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Per-tool attribution. `report` now shows which tools moved the bytes, and flags
+  tool calls that repeated identical input — the one form of waste nothing else
+  can see. A transcript records that a file was read; it never records that the
+  same file was read forty times. Measured at the hook via a new `PostToolUse`
+  handler, using the size of the payload as it arrived rather than re-serialising
+  `tool_response`, so a 200 kB tool result costs the same to measure as a 2-byte
+  one (43 ms vs 42 ms, measured).
+- It is reported in bytes, not tokens. This package ships no tokeniser, so it
+  does not convert one into the other and present a guess as a measurement. The
+  byte figure is `Buffer.byteLength` of the payload as it arrived — the first
+  draft used the string length, which counts UTF-16 code units and undercounted
+  CJK and emoji payloads by up to 3x while still being printed under the word
+  "bytes".
+- The repeat headline states how many sessions it is summing, and uses no ordinal:
+  an earlier draft said "moved a second time" next to "called 10 times identically"
+  in the same sentence, and said "the session" for a figure summed across the whole
+  reporting window. Its total is also taken from the session's own uncapped count,
+  not from the twelve largest groups the ledger keeps, which reported twelve
+  re-sends for a session that made fifteen.
+- Repeats are counted as re-sends, not as calls: a call made three times is two
+  re-sends, and the bytes charged to it are the two repeats' share, not all three.
+  The "worst" line names the largest single identical group rather than a per-tool
+  total, so it cannot describe calls with different inputs as identical.
+- Repeated calls are identified by a fingerprint of the tool's input. The input
+  itself is never recorded. A `Bash` input is a command line and an `Edit` input
+  is your source, so an earlier draft that kept a 160-character sample put a live
+  credential into `ledger.jsonl` and into `report --json` — falsifying two
+  sentences in SECURITY.md. `report` now tells you a call repeated and how much
+  it moved, and deliberately cannot tell you what was in it.
+- The cost of it is one more hook process per tool call: ~43 ms, of which ~29 ms
+  is node starting up. That is roughly double the previous per-tool-call hook
+  overhead, so `doctor` now states the number, and `"measureTools": false` turns
+  it off for anyone who would rather not pay it.
+- A test now asserts that both install routes declare the same hook events. They
+  live in two hand-edited files — `HOOK_EVENTS` and the plugin manifest — and
+  nothing had connected them, so adding an event to one and forgetting the other
+  gave plugin users a quietly different tool.
+
 ### Fixed
 
 - A setting that does not exist is now reported instead of dropped in silence.

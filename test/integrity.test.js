@@ -49,7 +49,9 @@ test('by default NOT ONE TOKEN is added to the conversation', () => {
     ['UserPromptSubmit', { ...base, prompt: 'làm cái này đi' }],
     ['UserPromptSubmit', { ...base, prompt: 'refactor everything and migrate it' }],
     ['PreToolUse', { ...base, tool_name: 'Bash' }],
+    ['PostToolUse', { ...base, tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: 'ok' }],
     ['SubagentStart', base],
+    ['SubagentStop', base],
     ['PreCompact', base],
     ['Stop', base],
     ['SessionEnd', base]
@@ -158,4 +160,33 @@ test('the skill is the only thing in the package that addresses a model', () => 
   assert.deepEqual(skills, ['review'], `unexpected skills: ${skills.join(', ')}`);
   assert.ok(!fs.existsSync(path.join(root, 'agents')), 'no bundled agents');
   assert.ok(!fs.existsSync(path.join(root, 'commands')), 'no bundled commands');
+});
+
+test('nothing a tool was called with is ever written to disk', () => {
+  // SECURITY.md promises that prompts and code are never stored and that no API
+  // key is ever touched. A Bash tool_input IS a command line and an Edit
+  // tool_input IS the user's source, so recording even a truncated sample of one
+  // makes both sentences false — on disk, and again in `report --json`.
+  const home = tmpHome();
+  const secret = 'sk-live-DO-NOT-PERSIST-9f8e7d6c5b4a';
+  const code = "API_KEY = 'AKIA-PRIVATE-SOURCE-42'";
+  for (let i = 0; i < 2; i++) {
+    handle('PostToolUse', {
+      hook_event_name: 'PostToolUse', session_id: 'sec', cwd: home,
+      tool_name: 'Bash', tool_input: { command: `curl -H 'Authorization: Bearer ${secret}' https://x` }
+    }, 500);
+    handle('PostToolUse', {
+      hook_event_name: 'PostToolUse', session_id: 'sec', cwd: home,
+      tool_name: 'Edit', tool_input: { file_path: '/a.js', new_string: code }
+    }, 500);
+  }
+  const written = fs.readdirSync(path.join(home, 'sessions'))
+    .map(f => fs.readFileSync(path.join(home, 'sessions', f), 'utf8')).join('\n');
+  for (const leak of [secret, code, 'curl', 'Authorization', 'AKIA']) {
+    assert.ok(!written.includes(leak), `"${leak}" reached the state file`);
+  }
+  // and the count still works, which is the whole point of keeping the fingerprint
+  const state = JSON.parse(fs.readFileSync(path.join(home, 'sessions', 'sec.state.json'), 'utf8'));
+  const counts = Object.values(state.repeats).map((/** @type {any} */ r) => r.count);
+  assert.deepEqual(counts.sort(), [2, 2], 'both repeats are still detected');
 });

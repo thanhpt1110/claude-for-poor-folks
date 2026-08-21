@@ -66,6 +66,7 @@
  * @property {{ minReadRatio: number, minInputTokens: number }} cache
  * @property {{ warnSubagents: number, warnCompacts: number }} fanout
  * @property {'warn'|'ask'} onLimit
+ * @property {boolean} measureTools
  * @property {boolean} unattended
  * @property {boolean} askProfile    the only setting that adds tokens
  * @property {boolean} quiet
@@ -134,6 +135,8 @@
  * @property {'prompt'|null} [budgetSource]
  * @property {number} promptCount
  * @property {number} toolCount
+ * @property {Record<string, {calls: number, bytes: number, ms: number}>} [toolStats]
+ * @property {Record<string, {tool: string, count: number, bytes: number}>} [repeats]
  * @property {number} subagentCount
  * @property {number} compactCount
  * @property {Record<string, number>} [agentTypes]
@@ -213,6 +216,9 @@
  * @property {string|null} [profileSource]
  * @property {number} [promptCount]
  * @property {number} [toolCount]
+ * @property {Record<string, {calls: number, bytes: number, ms: number}>} [toolStats]
+ * @property {{tool: string, count: number, bytes: number}[]} [repeats]
+ * @property {{resent: number, bytes: number}} [repeatTotals]
  * @property {number} [subagentCount]
  * @property {number} [compactCount]
  * @property {number|null} [ctxPct]

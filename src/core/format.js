@@ -31,6 +31,20 @@ export function humanTokens(n) {
   return String(v);
 }
 
+/**
+ * Bytes as they arrived on the hook's stdin — a measured quantity, not tokens
+ * inferred from one. Naming it in bytes keeps it honest: this tool ships no
+ * tokeniser, so it does not pretend to know the token count of a tool result.
+ * @param {unknown} n
+ */
+export function humanBytes(n) {
+  const v = Number(n || 0);
+  if (v >= 1e9) return `${(v / 1e9).toFixed(1)} GB`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)} MB`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(0)} kB`;
+  return `${v} B`;
+}
+
 /** @param {unknown} n */
 export function money(n) {
   const v = Number(n || 0);

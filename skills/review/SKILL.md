@@ -35,11 +35,16 @@ Interpret `leaks` with this, and do not invent causes beyond it:
 | `cache` | prompt-cache read ratio. Cache reads cost about a tenth of fresh input, so this is the largest single lever | editing files that are already in context, a tool that injects a timestamp or a random id, switching model or effort mid-session |
 | `compaction` | a session was compacted, which re-reads and re-summarises everything | one session carrying several unrelated tasks |
 | `fanout` | many subagents; each carries its own context and bills separately | delegating work that the main thread could have done in a few tool calls |
+| `repeat-calls` | the same input was sent to the same tool more than once. `data.resent` counts only the sends after the first; `data.worst[0]` is the largest single identical group | a loop re-reading a file it already read, a check repeated after every edit, a subagent re-fetching what the parent already had. What was in the calls is deliberately not recorded, so reason from the tool name and the counts |
 | `over-budget` | sessions finished past their cap | the cap is wrong for that kind of work, or the task was classified wrongly |
 | `blind-meter` | the tool stopped understanding Claude Code's payload | the tool is out of date; the dollar figures for those sessions are not trustworthy |
 
 Also look at the data itself, not only at `leaks`:
 
+- **Which tools moved the bytes.** `toolStats` gives per-tool `calls`, `bytes` and `ms`. Bytes
+  are measured at the hook, not converted into tokens, so treat them as a relative signal
+  between tools rather than as a cost. A tool with few calls but most of the bytes is a
+  different problem from one with many small calls.
 - **Concentration.** If one entry in `byProfile` or `byRepo` holds most of `totalUsd`, that is
   where any change pays off. A 20% saving on the largest line beats eliminating the smallest.
 - **Cost per session.** `totalUsd / sessions` against the caps in `.poor-folks.json`. If the

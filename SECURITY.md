@@ -18,6 +18,13 @@ never sent anywhere.
 - `~/.poor-folks/` — session counters, a ledger of costs, your global config, and one small
   flag per project under `notices/` recording that a one-time message has already been shown,
   so it is not repeated. Flags age out on the same schedule as session state.
+- Per-tool counters, when `measureTools` is on (the default): for each tool, how many times it
+  ran, how many bytes its payload was, and how long it took. To notice that the same call was
+  made twice it stores a 32-bit fingerprint of the tool's input — **never the input itself**.
+  A `Bash` input is a command line and an `Edit` input is your source, so recording even a
+  truncated sample of one would break the two guarantees below. Only the fingerprint and the
+  count are kept, and `report` says the count without saying what was in the call. Set
+  `"measureTools": false` to record none of it.
 - `.poor-folks.json` in the repo you ran `init` in.
 - `.claude/settings.json` — only the status line and hook entries it added, each marked so
   `uninstall` removes exactly those and nothing else. A timestamped backup is written first.
@@ -32,7 +39,11 @@ never sent anywhere.
   or a call to `fetch`.
 - **No runtime dependencies.** Nothing else is installed, so there is no transitive supply
   chain to trust.
-- **No credentials read or written.** It never touches an API key.
+- **No credentials stored or sent.** Tool inputs pass through the process — a `Bash` input is
+  a command line and may contain a key — and are hashed to a 32-bit fingerprint in memory so
+  that a repeated call can be counted. Neither the input nor anything derived from it beyond
+  that fingerprint is written down, and nothing is ever transmitted. It reads no credential
+  store and writes no API key.
 - **Nothing added to your conversation** under the default configuration.
 
 ## Verifying that yourself

@@ -61,6 +61,11 @@ export const DEFAULTS = Object.freeze(/** @type {import('../types.js').Config} *
   context: { warnPct: null },  // null = take the profile's ctxWarnPct
   cache: { minReadRatio: 0.5, minInputTokens: 150000 },
   fanout: { warnSubagents: 8, warnCompacts: 2 },
+  // Per-tool attribution. On by default because "you spent $5" is not actionable
+  // and "40 Read calls on one file" is — but it is one more hook process per tool
+  // call (measured: ~43ms, of which 29ms is node starting up), so it is a real
+  // cost and there is a switch for anyone who would rather not pay it.
+  measureTools: true,
   onLimit: 'warn',             // 'warn' | 'ask'   (v1 never denies)
   unattended: false,
   // Off by default on purpose: this is the ONLY setting that puts text in front
@@ -305,6 +310,7 @@ export function validateConfig(raw) {
   if (cfg.fanout.warnCompacts == null) cfg.fanout.warnCompacts = DEFAULTS.fanout.warnCompacts;
 
   if (cfg.onLimit !== 'ask') cfg.onLimit = 'warn';
+  cfg.measureTools = cfg.measureTools !== false;
   cfg.unattended = Boolean(cfg.unattended);
   cfg.askProfile = Boolean(cfg.askProfile);
   cfg.quiet = Boolean(cfg.quiet);

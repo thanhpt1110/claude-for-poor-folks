@@ -134,12 +134,35 @@ function surface(state, decision) {
 }
 
 /**
+ * FNV-1a over the tool input. Only ever compared with itself, so it needs to be
+ * fast and stable, not cryptographic — and it avoids pulling in node:crypto on
+ * a path that runs after every single tool call.
+ * @param {string} str
+ * @returns {string}
+ */
+function fingerprint(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/** Bounds on what a single session may accumulate, so state cannot grow without limit. */
+const MAX_TOOL_NAMES = 40;
+const MAX_REPEAT_KEYS = 400;
+
+/**
  * @param {string} event
  * @param {Partial<import('../types.js').HookPayload>} payload  parsed from stdin,
  *   so every field is treated as possibly absent — this handler reads defensively
+ * @param {number} [rawBytes]  size of the payload as it arrived. Used instead of
+ *   re-serialising `tool_response`, which can be megabytes and would put that cost
+ *   on every tool call purely to measure it.
  * @returns {import('../types.js').HookResult}
  */
-export function handle(event, payload) {
+export function handle(event, payload, rawBytes = 0) {
   const sessionId = payload.session_id || 'unknown';
   const cwd = payload.cwd || process.cwd();
   const config = loadConfig(cwd);
@@ -299,6 +322,46 @@ export function handle(event, payload) {
       return res;
     }
 
+    case 'PostToolUse': {
+      if (!config.measureTools) return {};
+      // Deliberately does NOT read the transcript. This fires after every tool
+      // call, so anything expensive here is paid hundreds of times a session by
+      // a tool whose whole purpose is to not waste the user's resources.
+      const name = String(payload.tool_name || 'unknown');
+      const stats = state.toolStats || (state.toolStats = {});
+      const seen = stats[name];
+      if (seen || Object.keys(stats).length < MAX_TOOL_NAMES) {
+        const entry = seen || (stats[name] = { calls: 0, bytes: 0, ms: 0 });
+        entry.calls++;
+        entry.bytes += rawBytes;
+        entry.ms += Number(payload.duration_ms) || 0;
+      }
+
+      // Identical input to the same tool is the cheapest waste to find and the
+      // one nothing else reports: the transcript shows the bytes, never that the
+      // same bytes were fetched before.
+      // Only the fingerprint is kept, never the input it came from. A Bash
+      // tool_input is a command line, which carries credentials; an Edit
+      // tool_input is the user's source. SECURITY.md promises that prompts and
+      // code are never stored and that no API key is ever touched, and a
+      // truncated "sample" of the input would have made both sentences false —
+      // in a file on disk and in `report --json`. The actionable signal is that
+      // the SAME call happened N times, which the fingerprint carries on its own.
+      const repeats = state.repeats || (state.repeats = {});
+      let input = '';
+      try { input = JSON.stringify(payload.tool_input ?? null); } catch { input = ''; }
+      if (input) {
+        const key = `${name}:${fingerprint(input)}`;
+        const hit = repeats[key];
+        if (hit) { hit.count++; hit.bytes += rawBytes; }
+        else if (Object.keys(repeats).length < MAX_REPEAT_KEYS) {
+          repeats[key] = { tool: name, count: 1, bytes: rawBytes };
+        }
+      }
+      writeSessionState(state);
+      return {};
+    }
+
     case 'SubagentStart': {
       state.subagentCount = (state.subagentCount || 0) + 1;
       if (payload.agent_type) {
@@ -361,6 +424,14 @@ export function handle(event, payload) {
         budgetUsd: state.budgetUsd ?? limits.sessionUsd,
         promptCount: state.promptCount || 0,
         toolCount: state.toolCount || 0,
+        // Trimmed on the way in, not on the way out: the ledger rotates at 4 MB
+        // and one session with 400 distinct calls would otherwise dominate it.
+        toolStats: state.toolStats && Object.keys(state.toolStats).length ? state.toolStats : undefined,
+        repeats: topRepeats(state.repeats, 12),
+        // Separate from the capped list above: the headline has to be able to
+        // say how much was re-sent in total, and summing the top 12 would quietly
+        // report 12 when the truth was 15.
+        repeatTotals: repeatTotals(state.repeats),
         subagentCount: state.subagentCount || 0,
         compactCount: state.compactCount || 0,
         ctxPct: snap.ctxPct ?? null,
@@ -380,6 +451,39 @@ export function handle(event, payload) {
   }
 }
 
+
+/**
+ * Every repeated group, not just the ones that fit in the ledger. The first call
+ * of a group was work; only the ones after it were re-sent, so they are what is
+ * counted and what the byte total is apportioned to.
+ *
+ * @param {Record<string, {tool: string, count: number, bytes: number}>|undefined} repeats
+ */
+function repeatTotals(repeats) {
+  let resent = 0;
+  let bytes = 0;
+  for (const r of Object.values(repeats || {})) {
+    if (!(r.count > 1)) continue;
+    resent += r.count - 1;
+    bytes += r.bytes * (r.count - 1) / r.count;
+  }
+  return resent ? { resent, bytes: Math.round(bytes) } : undefined;
+}
+
+/**
+ * The worst repeated calls, largest first. Calls that happened once are dropped —
+ * they are just work, not waste — and the rest is capped so a single session
+ * cannot crowd the ledger.
+ *
+ * @param {Record<string, {tool: string, count: number, bytes: number}>|undefined} repeats
+ * @param {number} limit
+ */
+function topRepeats(repeats, limit) {
+  const rows = Object.values(repeats || {}).filter(r => r.count > 1);
+  if (!rows.length) return undefined;
+  return rows.sort((a, b) => b.bytes - a.bytes).slice(0, limit);
+}
+
 /** @param {string[]} argv */
 export async function main(argv) {
   let input = '';
@@ -387,7 +491,10 @@ export async function main(argv) {
   try {
     const payload = JSON.parse(input || '{}');
     const event = argv[0] || payload.hook_event_name || 'unknown';
-    const out = handle(event, payload);
+    // `input` is the decoded string; .length counts UTF-16 code units, which
+    // undercounts real bytes by up to 3x on CJK or emoji. It is labelled bytes
+    // everywhere it surfaces, so it has to actually be bytes.
+    const out = handle(event, payload, Buffer.byteLength(input));
     if (out && Object.keys(out).length) process.stdout.write(JSON.stringify(out));
   } catch {
     /* silence is the correct failure mode for a hook */
