@@ -9,6 +9,12 @@ import { runInstall, runUninstall, runDoctor } from '../src/cli/install.js';
 
 const HERE_INSTALL = path.dirname(fileURLToPath(import.meta.url));
 
+/** @param {string|undefined} prev */
+const restoreHome = prev => {
+  if (prev === undefined) delete process.env.POOR_FOLKS_HOME;
+  else process.env.POOR_FOLKS_HOME = prev;
+};
+
 /** @param {() => any} fn @returns {Promise<string>} */
 const capture = async fn => {
   /** @type {string[]} */
@@ -321,4 +327,41 @@ test('--status-line-only warns when nothing supplies the hooks', async () => {
     assert.ok(!('hooks' in JSON.parse(fs.readFileSync(settings, 'utf8'))),
       'and it must not leave an empty hooks key behind');
   } finally { process.chdir(cwd); }
+});
+
+test('doctor reports settings that are being ignored', async () => {
+  // doctor now reads the GLOBAL config too, so without this the suite fails on
+  // any machine whose own config has a typo — i.e. exactly the contributor this
+  // feature was written for.
+  const prevHome = process.env.POOR_FOLKS_HOME;
+  process.env.POOR_FOLKS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'poorclaude-home-'));
+  // These warnings were generated and then thrown away: `_warnings` had no
+  // reader anywhere in the codebase, so a config half-ignored looked identical
+  // to a config fully honoured — including to doctor, which said "ok".
+  const cwd = process.cwd();
+  try {
+    const { dir, settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    fs.writeFileSync(path.join(dir, '.poor-folks.json'), JSON.stringify({ budgetUsd: 0.5 }));
+    const out = await capture(() => runDoctor([]));
+    assert.match(out, /budgetUsd: not a setting/, 'the dead key is named');
+    assert.match(out, /budget\.sessionUsd/, 'and the live one is offered');
+    assert.match(out, /\.poor-folks\.json/, 'and the file to fix is pointed at');
+  } finally { process.chdir(cwd); restoreHome(prevHome); }
+});
+
+test('doctor stays quiet when the config is correct', async () => {
+  // doctor now reads the GLOBAL config too, so without this the suite fails on
+  // any machine whose own config has a typo — i.e. exactly the contributor this
+  // feature was written for.
+  const prevHome = process.env.POOR_FOLKS_HOME;
+  process.env.POOR_FOLKS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'poorclaude-home-'));
+  const cwd = process.cwd();
+  try {
+    const { dir, settings } = sandbox();
+    fs.writeFileSync(settings, '{}');
+    fs.writeFileSync(path.join(dir, '.poor-folks.json'), JSON.stringify({ budget: { sessionUsd: 5 } }));
+    const out = await capture(() => runDoctor([]));
+    assert.ok(!/not a setting/.test(out), 'nothing is wrong, so nothing is said');
+  } finally { process.chdir(cwd); restoreHome(prevHome); }
 });

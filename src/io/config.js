@@ -117,6 +117,110 @@ export function globalConfigPath() {
 }
 
 /**
+ * Settings whose keys are fixed. Everything else at the top level (`prices`,
+ * `budgetPhrases`, `customProfiles`) is an open map keyed by model id, language
+ * tag, or profile id, so its contents must never be flagged.
+ */
+export const CLOSED_SECTIONS = ['budget', 'quota', 'context', 'cache', 'fanout'];
+
+/**
+ * Object-valued settings whose keys are supplied by the user: model ids,
+ * language tags, profile ids. Their contents are never checked. Listed
+ * explicitly so that a new section added to DEFAULTS has to be classified as one
+ * or the other — a test fails otherwise, rather than the section silently losing
+ * its typo checking.
+ */
+export const OPEN_MAPS = ['prices', 'budgetPhrases', 'customProfiles'];
+
+/**
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function distance(a, b) {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let corner = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const next = Math.min(prev[j] + 1, prev[j - 1] + 1, corner + (a[i - 1] === b[j - 1] ? 0 : 1));
+      corner = prev[j];
+      prev[j] = next;
+    }
+  }
+  return prev[b.length];
+}
+
+/**
+ * The nearest real setting to something the user typed, or null when nothing is
+ * close enough that guessing would help more than it misleads.
+ * @param {string} typed
+ * @param {string[]} known
+ * @returns {string|null}
+ */
+function nearest(typed, known) {
+  let best = null;
+  let score = Infinity;
+  const lower = typed.toLowerCase();
+  // `budgetUsd` is the mistake this function exists for: it is not close enough
+  // to any real key by edit distance, but it plainly means the budget section.
+  const section = CLOSED_SECTIONS.find(sec => lower.startsWith(sec));
+  if (section) {
+    const inSection = known.filter(k => k.startsWith(`${section}.`));
+    if (inSection.length) {
+      // `Budget` on its own used to fall through to edit distance and land on
+      // `quiet` — the one setting that silences these warnings, which is the
+      // worst possible advice for someone who just mistyped a section name.
+      const tail = lower.slice(section.length);
+      const hit = tail && inSection.find(k => (k.split('.').pop() || '').toLowerCase().includes(tail));
+      return hit || inSection[0];
+    }
+  }
+  for (const k of known) {
+    const d = distance(lower, k.toLowerCase().split('.').pop() || k);
+    const full = distance(lower, k.toLowerCase());
+    const hit = Math.min(d, full);
+    if (hit < score) { score = hit; best = k; }
+  }
+  return score <= Math.max(3, Math.ceil(typed.length / 2)) ? best : null;
+}
+
+/**
+ * Report settings that do not exist.
+ *
+ * A wrong VALUE is repaired below and reported. A wrong KEY used to be silently
+ * dropped, which is worse: `{"budgetUsd": 0.5}` looks exactly like a budget, so
+ * the user believes they are capped at $0.50 while the profile default is what
+ * actually runs. Nothing anywhere said otherwise.
+ *
+ * @param {unknown} raw
+ * @param {string[]} warnings
+ */
+function reportUnknownKeys(raw, warnings) {
+  if (!isObj(raw)) return;
+  const knownPaths = [
+    ...Object.keys(DEFAULTS).filter(k => !CLOSED_SECTIONS.includes(k)),
+    ...CLOSED_SECTIONS.flatMap(sec => Object.keys(/** @type {any} */ (DEFAULTS)[sec]).map(k => `${sec}.${k}`))
+  ];
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.startsWith('_')) continue;
+    if (!(key in DEFAULTS)) {
+      const guess = nearest(key, knownPaths);
+      warnings.push(`${key}: not a setting. ${guess ? `Did you mean "${guess}"? ` : ''}It is being ignored.`);
+      continue;
+    }
+    if (CLOSED_SECTIONS.includes(key) && isObj(value)) {
+      const inner = Object.keys(/** @type {any} */ (DEFAULTS)[key]);
+      for (const sub of Object.keys(value)) {
+        if (inner.includes(sub)) continue;
+        const guess = nearest(sub, inner.map(k => `${key}.${k}`));
+        warnings.push(`${key}.${sub}: not a setting. ${guess ? `Did you mean "${guess}"? ` : ''}It is being ignored.`);
+      }
+    }
+  }
+}
+
+/**
  * Coerce a config into something the engine can actually use.
  *
  * This exists because of a real failure: writing `"warnAtPct": 80` instead of
@@ -134,6 +238,8 @@ export function validateConfig(raw) {
   const warnings = [];
   /** @type {any} */
   const cfg = deepMerge(DEFAULTS, raw || {});
+
+  reportUnknownKeys(raw, warnings);
 
   /** @param {unknown} value @param {string} label @param {number|null} fallback */
   const positive = (value, label, fallback) => {

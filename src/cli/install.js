@@ -13,7 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { bold, dim, green, yellow, red } from '../core/format.js';
-import { homeDir } from '../io/config.js';
+import { homeDir, loadConfig } from '../io/config.js';
 import { skillPath, SKILL_DIR_NAME, MARKER, settingsPath, readSettings, isOurs, statusLineState } from '../io/wiring.js';
 
 
@@ -228,6 +228,17 @@ export async function runDoctor(_argv = []) {
   /** @param {string} s */ const ok = s => `${green('ok')}    ${s}`;
   /** @param {string} s */ const bad = s => `${red('fail')}  ${s}`;
   /** @param {string} s */ const note = s => `${yellow('note')}  ${s}`;
+
+  // `status` has printed these since the first release, but `doctor` is where
+  // people look when something seems wrong, and it answered `ok`. Half of
+  // someone's budget file being ignored is the failure this tool exists to
+  // prevent, so it is reported here at the same severity `status` uses.
+  const cfg = loadConfig(process.cwd());
+  for (const w of cfg._warnings || []) lines.push(note(w));
+  if ((cfg._warnings || []).length && cfg._sources) {
+    if (cfg._sources.repo) lines.push(dim(`      repo config:   ${cfg._sources.repo}`));
+    lines.push(dim(`      global config: ${cfg._sources.global}`));
+  }
 
   // A fresh, correct install has nothing in the global settings. Reporting that
   // in amber made a working setup look broken, so only the scope that is

@@ -3,6 +3,26 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A setting that does not exist is now reported instead of dropped in silence.
+  `{"budgetUsd": 0.5}` looks exactly like a budget, is not one, and left the
+  profile default running — so the user believed they were capped at $0.50 while
+  something else was enforced, and nothing anywhere said otherwise. Unknown keys
+  are now named, with the real setting suggested (`budget.sessionUsd`), at both
+  the top level and inside `budget`, `quota`, `context`, `cache` and `fanout`.
+  Maps that legitimately hold arbitrary keys — `prices`, `budgetPhrases`,
+  `customProfiles` — are never flagged.
+- Config warnings now reach a human where they are actually being read.
+  `validateConfig` has repaired bad values and recorded why since the first
+  release, and `status` has printed them for just as long — but `doctor` said
+  `ok` on a broken config and the session banner said nothing, which are the two
+  places people look. `doctor` now lists every ignored setting and the file it
+  came from, and the banner says how many there are. Both are `systemMessage`,
+  so neither costs a token.
+
 ## [0.1.1] — 2026-08-20
 
 Initial public release.

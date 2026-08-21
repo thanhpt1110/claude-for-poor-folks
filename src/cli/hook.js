@@ -209,6 +209,14 @@ export function handle(event, payload) {
         `[poor-folks] budget ${money(limits.sessionUsd)} · profile ${state.profile || 'auto'} · on-limit ${config.onLimit}` +
         `${config.unattended ? ' · unattended' : ''}${config.askProfile ? '' : ' · adds 0 tokens'}`
       ];
+      // A setting that does not exist is dropped in silence, so someone who
+      // wrote `budgetUsd` instead of `budget.sessionUsd` sees a budget in their
+      // file, a different one in the banner, and no reason for the gap. Say it
+      // where they are already looking. This is systemMessage, so it is free.
+      const ignored = config._warnings || [];
+      if (ignored.length) {
+        banner.push(`[poor-folks] ${ignored.length} setting${ignored.length > 1 ? 's' : ''} in your config ${ignored.length > 1 ? 'are' : 'is'} being ignored — run \`claude-for-poor-folks doctor\` for the list.`);
+      }
       // These hooks are clearly running or this code would not be executing, so
       // a missing status line means this is a plugin install: a plugin manifest
       // cannot declare one. Say it once, hand over the command, then never

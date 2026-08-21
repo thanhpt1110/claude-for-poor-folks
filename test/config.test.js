@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { tmpHome } from './helpers.js';
-import { validateConfig, loadConfig, effectiveLimits, homeDir, DEFAULTS } from '../src/io/config.js';
+import { validateConfig, loadConfig, effectiveLimits, homeDir, DEFAULTS, CLOSED_SECTIONS, OPEN_MAPS } from '../src/io/config.js';
 import { decide } from '../src/core/policy.js';
 
 test('a scalar where an array belongs is repaired instead of killing the tool', () => {
@@ -82,4 +82,76 @@ test('a home directory on a virtual filesystem is refused, a real tmpfs is not',
   process.env.POOR_FOLKS_HOME = '/dev/shm/poor-folks';
   assert.equal(homeDir(), '/dev/shm/poor-folks', '/dev/shm is an ordinary writable tmpfs');
   delete process.env.POOR_FOLKS_HOME;
+});
+
+test('a setting that does not exist is reported, not dropped in silence', () => {
+  // The failure this catches: `{"budgetUsd": 0.5}` looks exactly like a budget.
+  // It is not one, so the profile default runs instead — and nothing anywhere
+  // said so. The user believes they are capped at $0.50 and they are not.
+  const { config, warnings } = validateConfig({ budgetUsd: 0.5 });
+  assert.equal(config.budget.sessionUsd, null, 'the bogus key sets nothing');
+  const hit = warnings.find(w => w.startsWith('budgetUsd:'));
+  assert.ok(hit, 'and the user is told');
+  assert.match(hit, /budget\.sessionUsd/, 'with the setting they actually meant');
+});
+
+test('a misspelling inside a section is caught too', () => {
+  const { warnings } = validateConfig({ budget: { sessionUSD: 2 } });
+  const hit = warnings.find(w => w.startsWith('budget.sessionUSD:'));
+  assert.ok(hit);
+  assert.match(hit, /"budget\.sessionUsd"/);
+});
+
+test('maps that are meant to hold arbitrary keys are never flagged', () => {
+  // prices is keyed by model id, budgetPhrases by language tag, customProfiles
+  // by profile id. Flagging their contents would make the check unusable for
+  // exactly the people who configure the tool most.
+  const { warnings } = validateConfig({
+    prices: { 'claude-opus-5': { input: 5, output: 25 }, 'some-future-model': { input: 1 } },
+    budgetPhrases: { de: ['budget'], 'pt-BR': ['orçamento'] },
+    customProfiles: { 'my-own-thing': { sessionUsd: 3 } }
+  });
+  assert.deepEqual(warnings, []);
+});
+
+test('a correct config produces no noise at all', () => {
+  const { warnings } = validateConfig({
+    budget: { sessionUsd: 5, dailyUsd: 20, warnAtPct: [50, 90] },
+    quota: { warnFiveHourPct: 70 },
+    onLimit: 'ask',
+    quiet: false
+  });
+  assert.deepEqual(warnings, [], 'silence is the whole point when nothing is wrong');
+});
+
+test('internal fields round-trip without being called typos', () => {
+  // loadConfig writes _sources and _warnings onto the object it returns; feeding
+  // that back in must not accuse the tool of misconfiguring itself.
+  const { warnings } = validateConfig({ _sources: { global: '/x', repo: null }, _warnings: [] });
+  assert.deepEqual(warnings, []);
+});
+
+test('every section in DEFAULTS is classified, so none loses its typo check silently', () => {
+  // reportUnknownKeys only looks inside a section listed in CLOSED_SECTIONS.
+  // Adding a fixed-shape section to DEFAULTS and forgetting to list it would
+  // drop every typo inside it on the floor — the silent drift this tool is
+  // supposed to be the opposite of. Fail here instead of in someone's config.
+  const objectSettings = Object.entries(DEFAULTS)
+    .filter(([, v]) => v && typeof v === 'object' && !Array.isArray(v))
+    .map(([k]) => k);
+  const classified = new Set([...CLOSED_SECTIONS, ...OPEN_MAPS]);
+  const orphans = objectSettings.filter(k => !classified.has(k));
+  assert.deepEqual(orphans, [],
+    `add these to CLOSED_SECTIONS (fixed keys) or OPEN_MAPS (user-supplied keys): ${orphans.join(', ')}`);
+});
+
+test('a mistyped section name is not answered with "quiet"', () => {
+  // "quiet" is the setting that silences these warnings. Suggesting it to
+  // someone who mistyped a section name is the worst advice available.
+  for (const typed of ['Budget', 'Quota', 'Cache']) {
+    const [w] = validateConfig({ [typed]: 1 }).warnings;
+    assert.ok(w, `${typed} must still be flagged`);
+    assert.ok(!/"quiet"/.test(w), `${typed} must not be answered with quiet: ${w}`);
+    assert.match(w, new RegExp(`"${typed.toLowerCase()}\\.`), 'it points into the right section');
+  }
 });
