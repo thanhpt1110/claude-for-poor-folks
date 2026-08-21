@@ -167,9 +167,15 @@ test('nothing a tool was called with is ever written to disk', () => {
   // key is ever touched. A Bash tool_input IS a command line and an Edit
   // tool_input IS the user's source, so recording even a truncated sample of one
   // makes both sentences false — on disk, and again in `report --json`.
+  // The fixtures below are deliberately NOT shaped like real credentials. An
+  // earlier version used a payment provider's live-key prefix and a key-looking
+  // assignment; secret scanners match on shape rather than intent, so this
+  // repository — whose pitch is that it never touches a key — was reported as
+  // leaking one. The assertion only needs a string unique enough to grep for.
+  // Realism bought nothing and cost a permanent false positive.
   const home = tmpHome();
-  const secret = 'sk-live-DO-NOT-PERSIST-9f8e7d6c5b4a';
-  const code = "API_KEY = 'AKIA-PRIVATE-SOURCE-42'";
+  const secret = 'fixture-not-a-credential-9f8e7d6c5b4a';
+  const code = "greeting = 'fixture-not-a-credential-in-source'";
   for (let i = 0; i < 2; i++) {
     handle('PostToolUse', {
       hook_event_name: 'PostToolUse', session_id: 'sec', cwd: home,
@@ -182,11 +188,49 @@ test('nothing a tool was called with is ever written to disk', () => {
   }
   const written = fs.readdirSync(path.join(home, 'sessions'))
     .map(f => fs.readFileSync(path.join(home, 'sessions', f), 'utf8')).join('\n');
-  for (const leak of [secret, code, 'curl', 'Authorization', 'AKIA']) {
+  for (const leak of [secret, code, 'curl', 'Authorization', 'fixture-not-a-credential']) {
     assert.ok(!written.includes(leak), `"${leak}" reached the state file`);
   }
   // and the count still works, which is the whole point of keeping the fingerprint
   const state = JSON.parse(fs.readFileSync(path.join(home, 'sessions', 'sec.state.json'), 'utf8'));
   const counts = Object.values(state.repeats).map((/** @type {any} */ r) => r.count);
   assert.deepEqual(counts.sort(), [2, 2], 'both repeats are still detected');
+});
+
+test('nothing in this repository looks like a credential', () => {
+  // A tool that promises it never touches an API key must not be the reason a
+  // secret scanner fires. Test fixtures shaped like real keys are still flagged —
+  // scanners match on shape, not on intent — so the shapes are kept out entirely.
+  // The prefixes are assembled at runtime so that this file does not itself
+  // contain the literals it is looking for.
+  const shapes = [
+    ['sk', '_live_'], ['sk', '-live-'], ['sk', '-ant-api'], ['gh', 'p_'],
+    ['xo', 'xb-'], ['AKI', 'A'], ['ASI', 'A'], ['-----BEGIN ', 'PRIVATE KEY-----']
+  ].map(parts => parts.join(''));
+
+  const roots = ['src', 'test', 'skills', 'scripts', 'bin', '.claude-plugin', '.github'];
+  /**
+   * @param {string} target
+   * @returns {string[]}
+   */
+  const walk = target => {
+    if (!fs.existsSync(target)) return [];
+    if (!fs.statSync(target).isDirectory()) return [target];
+    return fs.readdirSync(target, { withFileTypes: true })
+      .flatMap(e => walk(path.join(target, e.name)));
+  };
+
+  const root = path.join(HERE, '..');
+  /** @type {string[]} */
+  const hits = [];
+  for (const rel of [...roots.map(r => path.join(root, r)), path.join(root, 'README.md')]) {
+    for (const file of walk(rel)) {
+      let text;
+      try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+      for (const shape of shapes) {
+        if (text.includes(shape)) hits.push(`${path.relative(root, file)} contains ${shape}`);
+      }
+    }
+  }
+  assert.deepEqual(hits, [], 'use a fixture that is not shaped like a key');
 });
