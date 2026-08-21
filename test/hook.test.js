@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tmpHome, present } from './helpers.js';
@@ -329,15 +330,19 @@ test('the byte count is bytes, on the real stdin path', async () => {
   });
   assert.ok(Buffer.byteLength(payload) > payload.length, 'the fixture must actually be multibyte');
 
-  const cli = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'cli', 'index.js');
-  await new Promise((resolve, reject) => {
+  // `new URL(import.meta.url).pathname` yields "/C:/Users/..." on Windows — a
+  // leading slash that is not a valid path there, so the child never started and
+  // the failure surfaced as a missing state file rather than as itself.
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'cli', 'index.js');
+  const code = await new Promise((resolve, reject) => {
     const p = spawn(process.execPath, [cli, 'hook'], {
       env: { ...process.env, POOR_FOLKS_HOME: home }, stdio: ['pipe', 'ignore', 'ignore']
     });
     p.on('error', reject);
-    p.on('close', () => resolve(undefined));
+    p.on('close', c => resolve(c));
     p.stdin.end(payload);
   });
+  assert.equal(code, 0, 'the hook must have run at all before its output is judged');
 
   const state = JSON.parse(fs.readFileSync(path.join(home, 'sessions', 'utf8.state.json'), 'utf8'));
   assert.equal(state.toolStats.Read.bytes, Buffer.byteLength(payload));
